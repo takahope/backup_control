@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>備份管制表單與儀表板</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* 自訂隱藏與顯示的過渡效果 */
+    .hidden-section { display: none; }
+    /* 卡片展開的平滑過渡 */
+    .target-card { transition: all 0.3s ease; }
+    /* 導覽列作用中樣式 */
+    .nav-active { border-bottom-width: 4px; border-color: #2563eb; color: #1d4ed8; font-weight: bold; }
+    .nav-inactive { color: #6b7280; }
+    .nav-inactive:hover { color: #374151; border-bottom-width: 4px; border-color: #d1d5db; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+
+  <!-- 頂部導覽列 -->
+  <nav class="bg-white shadow-sm sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4">
+      <div class="flex justify-between h-16">
+        <div class="flex space-x-8 items-center">
+          <div class="text-xl font-extrabold text-blue-800 tracking-wider flex items-center">
+            <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+            備份管制
+          </div>
+          <div class="flex h-full">
+            <button onclick="switchTab('dashboard')" id="tab-dashboard" class="nav-active px-3 py-2 flex items-center transition-colors duration-200">
+              管理儀表板
+            </button>
+            <button onclick="switchTab('form')" id="tab-form" class="nav-inactive px-3 py-2 flex items-center transition-colors duration-200 ml-4">
+              新增設定
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-6xl mx-auto p-6 mt-4">
+    
+    <!-- ==================== 儀表板視圖 ==================== -->
+    <div id="dashboardView">
+      
+      <!-- 統計數據 -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 flex items-center">
+          <div class="p-4 rounded-full bg-blue-100 text-blue-600 mr-4">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+          </div>
+          <div>
+            <p class="text-sm text-gray-500 font-medium">總納管系統數</p>
+            <p class="text-3xl font-bold text-gray-800" id="statTotal">0</p>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 flex items-center">
+          <div class="p-4 rounded-full bg-red-100 text-red-600 mr-4">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+          </div>
+          <div>
+            <p class="text-sm text-gray-500 font-medium">關鍵核心系統</p>
+            <p class="text-3xl font-bold text-gray-800" id="statCritical">0</p>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 flex items-center">
+          <div class="p-4 rounded-full bg-green-100 text-green-600 mr-4">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          </div>
+          <div>
+            <p class="text-sm text-gray-500 font-medium">總備份項目數</p>
+            <p class="text-3xl font-bold text-gray-800" id="statTargets">0</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 系統列表 Header -->
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-gray-800">系統備份設定一覽</h2>
+        <div class="relative">
+          <input type="text" id="searchInput" placeholder="搜尋系統名稱..." onkeyup="renderDashboard()" class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 shadow-sm w-64">
+          <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        </div>
+      </div>
+
+      <!-- 系統卡片網格 -->
+      <div id="systemCardsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- JS 將在此處渲染系統卡片 -->
+      </div>
+      
+      <!-- 無資料時的空狀態 -->
+      <div id="emptyState" class="hidden flex flex-col items-center justify-center py-20 bg-white rounded-xl shadow-sm border border-gray-200">
+        <svg class="w-20 h-20 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
+        <h3 class="text-lg font-medium text-gray-900">目前尚無備份設定</h3>
+        <p class="text-gray-500 mt-1 mb-6">點擊上方「新增設定」開始建立第一筆紀錄。</p>
+        <button onclick="switchTab('form')" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition">
+          立即新增
+        </button>
+      </div>
+    </div>
+
+
+    <!-- ==================== 表單視圖 ==================== -->
+    <div id="formView" class="hidden">
+      <div class="bg-white p-8 rounded-xl shadow-md border border-gray-200">
+        <div class="flex justify-between items-center mb-6 border-b pb-4">
+          <h2 id="formTitle" class="text-2xl font-bold text-gray-800">新增備份管制設定單</h2>
+          <button id="cancelEditBtn" onclick="cancelEdit()" class="hidden bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg transition">
+            取消編輯並返回
+          </button>
+        </div>
+        
+        <form id="backupForm" onsubmit="handleFormSubmit(event)">
+          <!-- 隱藏的 ID 欄位，用於判斷是新增還是更新 -->
+          <input type="hidden" id="systemId" value="">
+          
+          <!-- 第一區：系統基本資訊 -->
+          <div class="mb-8 p-5 bg-blue-50 rounded-xl border border-blue-100">
+            <h3 class="text-lg font-semibold text-blue-800 mb-4">1. 系統基本資訊</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label class="block text-sm font-medium text-gray-700">系統/設備名稱</label>
+                <input type="text" id="systemName" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">系統屬性</label>
+                <select id="systemLevel" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                  <option value="關鍵核心系統">關鍵核心系統</option>
+                  <option value="一般系統">一般系統</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">系統管理人員</label>
+                <input type="text" id="managerName" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+              </div>
+            </div>
+          </div>
+
+          <!-- 第二區：備份標的清單 -->
+          <div class="mb-8">
+            <div class="flex justify-between items-end mb-4">
+              <h3 class="text-lg font-semibold text-gray-800">2. 備份標的設定 (請依序確認)</h3>
+              <p class="text-xs text-gray-500">展開擁有的標的並填寫，若無該標的請保持未勾選狀態。</p>
+            </div>
+            
+            <!-- 卡片容器 -->
+            <div id="targetsContainer" class="space-y-4">
+              <!-- JS 將在此處渲染所有備份標的卡片 -->
+            </div>
+          </div>
+
+          <!-- 送出按鈕 -->
+          <div class="flex justify-end pt-4 border-t border-gray-200">
+            <button type="submit" id="submitBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-10 rounded-lg shadow-md transition duration-200 focus:ring-4 focus:ring-blue-300">
+              儲存並送出紀錄
+            </button>
+          </div>
+          
+          <!-- 訊息提示 -->
+          <div id="statusMessage" class="mt-4 text-center hidden p-3 rounded-md font-medium"></div>
+        </form>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // --- 狀態管理 (使用 LocalStorage 模擬後端資料庫) ---
+    const STORAGE_KEY = 'isms_backup_records';
+    let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+
+    // --- 安全工具：避免將使用者輸入直接注入 innerHTML ---
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function safeText(value, fallback = '未填寫') {
+      const text = String(value ?? '').trim();
+      return text ? escapeHtml(text) : fallback;
+    }
+
+    function formatCycle(value, unit) {
+      const v = String(value ?? '').trim();
+      const u = String(unit ?? '').trim();
+      if (!v || v === 'N/A' || v === '無') return '無';
+      return escapeHtml(u ? `${v} ${u}` : v);
+    }
+
+    function formatRetention(value) {
+      const v = String(value ?? '').trim();
+      if (!v || v === 'N/A' || v === '無') return '無';
+      return escapeHtml(v.endsWith('代') || v.includes('保存') ? v : `${v} 代`);
+    }
+
+    function renderTargetSetting(target) {
+      const name = safeText(target.targetName, '未命名標的');
+      const isLogTarget = String(target.targetName || '').trim() === '系統日誌檔';
+      const offsiteEnabled = String(target.isOffsite || '').trim() === '是';
+
+      const localDiff = isLogTarget ? '無' : formatCycle(target.localDiffValue, target.localDiffUnit);
+      const localFull = isLogTarget ? '無' : formatCycle(target.localFullValue, target.localFullUnit);
+      const localRetention = isLogTarget
+        ? safeText(target.logRetention, '無')
+        : formatRetention(target.localRetention);
+      const localLocation = safeText(target.localLocation, '未填寫');
+      const offsiteCycle = offsiteEnabled ? formatCycle(target.offsiteFreqValue, target.offsiteFreqUnit) : '無';
+      const offsiteLocation = offsiteEnabled ? safeText(target.offsiteLocation, '未填寫') : '無';
+      const offsiteRetention = offsiteEnabled ? formatRetention(target.offsiteRetention) : '無';
+
+      return `
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2">
+          <div class="text-sm font-semibold text-gray-800 mb-2">${name}</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-700">
+            <div><span class="text-gray-500">本地差異：</span>${localDiff}</div>
+            <div><span class="text-gray-500">本地完整：</span>${localFull}</div>
+            <div><span class="text-gray-500">本地保留：</span>${localRetention}</div>
+            <div><span class="text-gray-500">本地位置：</span>${localLocation}</div>
+            <div><span class="text-gray-500">是否異地：</span>${offsiteEnabled ? '是' : '否'}</div>
+            <div><span class="text-gray-500">異地週期：</span>${offsiteCycle}</div>
+            <div><span class="text-gray-500">異地位置：</span>${offsiteLocation}</div>
+            <div><span class="text-gray-500">異地保留：</span>${offsiteRetention}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- 系統所有的備份標的清單 (設定檔) ---
+    const backupTargets = [
+      { id: 'config', name: '設定檔' },
+      { id: 'source', name: '原始碼' },
+      { id: 'db', name: '資料庫' },
+      { id: 'log', name: '系統日誌檔' },
+      { id: 'image', name: '整體影像備份' },
+      { id: 'other', name: '其他' }
+    ];
+
+    // --- 初始化應用程式 ---
+    document.addEventListener('DOMContentLoaded', () => {
+      renderFormTargets();
+      loadDashboardData();
+    });
+
+    // --- 優先從後端讀取資料；若失敗則回退到本地快取 ---
+    function loadDashboardData() {
+      if (typeof google !== 'undefined' && google.script) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            if (response && response.success && Array.isArray(response.data)) {
+              appData = response.data;
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+            } else {
+              appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+            }
+            renderDashboard();
+          })
+          .withFailureHandler(function() {
+            appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+            renderDashboard();
+          })
+          .getDashboardData();
+      } else {
+        appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+        renderDashboard();
+      }
+    }
+
+    // --- 視圖切換邏輯 ---
+    function switchTab(tabName) {
+      const dashboardView = document.getElementById('dashboardView');
+      const formView = document.getElementById('formView');
+      const tabDashboard = document.getElementById('tab-dashboard');
+      const tabForm = document.getElementById('tab-form');
+
+      if (tabName === 'dashboard') {
+        dashboardView.classList.remove('hidden');
+        formView.classList.add('hidden');
+        tabDashboard.className = 'nav-active px-3 py-2 flex items-center transition-colors duration-200';
+        tabForm.className = 'nav-inactive px-3 py-2 flex items-center transition-colors duration-200 ml-4';
+        renderDashboard(); // 確保重新渲染最新數據
+      } else {
+        dashboardView.classList.add('hidden');
+        formView.classList.remove('hidden');
+        tabForm.className = 'nav-active px-3 py-2 flex items-center transition-colors duration-200 ml-4';
+        tabDashboard.className = 'nav-inactive px-3 py-2 flex items-center transition-colors duration-200';
+        
+        // 只有在按下「新增設定」Tab 時才重置表單 (如果是編輯進來的，保留資料)
+        if (!document.getElementById('systemId').value) {
+          resetForm();
+        }
+      }
+    }
+
+    // --- 渲染儀表板 ---
+    function renderDashboard() {
+      const container = document.getElementById('systemCardsContainer');
+      const emptyState = document.getElementById('emptyState');
+      const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+      
+      // 統計變數
+      let criticalCount = 0;
+      let totalTargetsCount = 0;
+      
+      // 篩選資料
+      const filteredData = appData.filter(sys => {
+        const systemName = String(sys.systemName || '');
+        const managerName = String(sys.managerName || '');
+        const targets = Array.isArray(sys.targets) ? sys.targets : [];
+
+        if (sys.systemLevel === '關鍵核心系統') criticalCount++;
+        totalTargetsCount += targets.length;
+        
+        return systemName.toLowerCase().includes(searchTerm) || 
+               managerName.toLowerCase().includes(searchTerm);
+      });
+
+      // 更新統計指標 (依據原始全量資料來顯示整體統計會更好，這裡展示全量統計)
+      criticalCount = appData.filter(s => s.systemLevel === '關鍵核心系統').length;
+      totalTargetsCount = appData.reduce((sum, sys) => sum + (Array.isArray(sys.targets) ? sys.targets.length : 0), 0);
+      
+      document.getElementById('statTotal').innerText = appData.length;
+      document.getElementById('statCritical').innerText = criticalCount;
+      document.getElementById('statTargets').innerText = totalTargetsCount;
+
+      if (filteredData.length === 0) {
+        container.innerHTML = '';
+        emptyState.classList.remove('hidden');
+        if(appData.length > 0) {
+          emptyState.querySelector('h3').innerText = '找不到符合條件的系統';
+          emptyState.querySelector('p').innerText = '請嘗試其他的搜尋關鍵字。';
+          emptyState.querySelector('button').classList.add('hidden');
+        } else {
+          emptyState.querySelector('h3').innerText = '目前尚無備份設定';
+          emptyState.querySelector('p').innerText = '點擊上方「新增設定」開始建立第一筆紀錄。';
+          emptyState.querySelector('button').classList.remove('hidden');
+        }
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      
+      // 渲染卡片
+      let html = '';
+      filteredData.forEach(sys => {
+        const isCritical = sys.systemLevel === '關鍵核心系統';
+        const badgeColor = isCritical ? 'bg-red-100 text-red-800 border-red-200' : 'bg-blue-100 text-blue-800 border-blue-200';
+        
+        // 渲染備份標的詳情
+        const targets = Array.isArray(sys.targets) ? sys.targets : [];
+        const targetsHtml = targets.map(renderTargetSetting).join('');
+
+        html += `
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow duration-200 flex flex-col h-full">
+            <div class="p-5 border-b border-gray-100 flex-grow">
+              <div class="flex justify-between items-start mb-2">
+                <h3 class="text-xl font-bold text-gray-800 truncate pr-2" title="${escapeHtml(sys.systemName)}">${escapeHtml(sys.systemName)}</h3>
+                <span class="shrink-0 px-2.5 py-0.5 rounded-full text-xs font-medium border ${badgeColor}">
+                  ${escapeHtml(sys.systemLevel)}
+                </span>
+              </div>
+              <p class="text-sm text-gray-500 mb-4 flex items-center">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                負責人: ${safeText(sys.managerName)}
+              </p>
+              
+              <div class="mt-4">
+                <p class="text-xs text-gray-500 mb-2 font-semibold">已啟用備份標的與設定值：</p>
+                <div>
+                  ${targetsHtml || '<span class="text-xs text-gray-400 italic">無設定標的</span>'}
+                </div>
+              </div>
+            </div>
+            
+            <div class="bg-gray-50 p-3 rounded-b-xl flex justify-end space-x-2 border-t border-gray-100">
+              <button data-action="edit" data-id="${escapeHtml(sys.id)}" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-white border border-blue-200 rounded hover:bg-blue-50 transition">
+                編輯內容
+              </button>
+              <button data-action="delete" data-id="${escapeHtml(sys.id)}" class="px-3 py-1.5 text-sm font-medium text-red-600 bg-white border border-red-200 rounded hover:bg-red-50 transition">
+                刪除
+              </button>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+      container.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', () => editSystem(btn.dataset.id));
+      });
+      container.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', () => deleteSystem(btn.dataset.id));
+      });
+    }
+
+    // --- 刪除系統 ---
+    function deleteSystem(id) {
+      if(confirm('確定要刪除此系統的備份設定嗎？此動作無法復原。')) {
+        appData = appData.filter(s => s.id !== id);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+        renderDashboard();
+      }
+    }
+
+    // --- 編輯系統 (載入資料至表單) ---
+    function editSystem(id) {
+      const sys = appData.find(s => s.id === id);
+      if(!sys) return;
+
+      // 切換至表單視圖，並改變標題與按鈕狀態
+      switchTab('form');
+      document.getElementById('formTitle').innerText = `編輯系統備份設定：${sys.systemName}`;
+      document.getElementById('cancelEditBtn').classList.remove('hidden');
+      document.getElementById('submitBtn').innerText = '更新儲存紀錄';
+      document.getElementById('systemId').value = sys.id;
+
+      // 填入基本資料
+      document.getElementById('systemName').value = sys.systemName;
+      document.getElementById('systemLevel').value = sys.systemLevel;
+      document.getElementById('managerName').value = sys.managerName;
+
+      // 先重置所有卡片狀態為未選
+      backupTargets.forEach(t => {
+        document.getElementById(`check_${t.id}`).checked = false;
+        toggleTarget(t.id);
+      });
+
+      // 填入標的資料
+      sys.targets.forEach(tData => {
+        const targetDef = backupTargets.find(b => b.name === tData.targetName);
+        if(targetDef) {
+          const tid = targetDef.id;
+          // 勾選並展開卡片
+          document.getElementById(`check_${tid}`).checked = true;
+          toggleTarget(tid);
+
+          // 填值
+          if (tid === 'log') {
+            // 解析 "保存 X 單位"
+            if(tData.logRetention) {
+              const parts = tData.logRetention.replace('保存 ', '').split(' ');
+              if(parts.length >= 2) {
+                document.getElementById(`logRetVal_${tid}`).value = parts[0];
+                document.getElementById(`logRetUnit_${tid}`).value = parts[1];
+              }
+            }
+            document.getElementById(`logLocalLoc_${tid}`).value = tData.localLocation;
+          } else {
+            document.getElementById(`diffValue_${tid}`).value = tData.localDiffValue === 'N/A' ? '' : tData.localDiffValue;
+            document.getElementById(`diffUnit_${tid}`).value = tData.localDiffUnit;
+            document.getElementById(`fullValue_${tid}`).value = tData.localFullValue === 'N/A' ? '' : tData.localFullValue;
+            document.getElementById(`fullUnit_${tid}`).value = tData.localFullUnit;
+            document.getElementById(`localRet_${tid}`).value = tData.localRetention === 'N/A' ? '' : tData.localRetention;
+            document.getElementById(`localLoc_${tid}`).value = tData.localLocation;
+          }
+
+          // 異地存放設定
+          if (tData.isOffsite === '是') {
+            document.querySelector(`input[name="offsite_${tid}"][value="是"]`).checked = true;
+            toggleOffsite(tid, true);
+            document.getElementById(`offsiteFreqValue_${tid}`).value = tData.offsiteFreqValue;
+            document.getElementById(`offsiteFreqUnit_${tid}`).value = tData.offsiteFreqUnit;
+            document.getElementById(`offsiteLoc_${tid}`).value = tData.offsiteLocation;
+            document.getElementById(`offsiteRet_${tid}`).value = tData.offsiteRetention;
+          } else {
+            document.querySelector(`input[name="offsite_${tid}"][value="否"]`).checked = true;
+            toggleOffsite(tid, false);
+          }
+        }
+      });
+      
+      // 滾動到頂部
+      window.scrollTo(0, 0);
+    }
+
+    // --- 取消編輯 ---
+    function cancelEdit() {
+      resetForm();
+      switchTab('dashboard');
+    }
+
+    // --- 重置表單為預設狀態 ---
+    function resetForm() {
+      document.getElementById('backupForm').reset();
+      document.getElementById('systemId').value = '';
+      document.getElementById('formTitle').innerText = '新增備份管制設定單';
+      document.getElementById('cancelEditBtn').classList.add('hidden');
+      document.getElementById('submitBtn').innerText = '儲存並送出紀錄';
+      
+      backupTargets.forEach(t => toggleTarget(t.id));
+    }
+
+
+    // --- 渲染表單內部的卡片 HTML ---
+    function renderFormTargets() {
+      const container = document.getElementById('targetsContainer');
+      let html = '';
+      
+      backupTargets.forEach(target => {
+        let localBackupHtml = '';
+
+        if (target.id === 'log') {
+          localBackupHtml = `
+            <div class="space-y-4">
+              <h4 class="font-semibold text-gray-700 border-b pb-2">日誌保存設定</h4>
+              <div class="flex flex-col">
+                <label class="block text-sm font-medium text-gray-600 mb-2">日誌保存期間 <span class="text-red-500">*</span></label>
+                <div class="flex items-center">
+                  <span class="mr-2 text-sm font-medium text-gray-700">保存</span>
+                  <input type="number" id="logRetVal_${target.id}" min="1" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
+                  <select id="logRetUnit_${target.id}" class="block w-24 rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
+                    <option value="個月">個月</option>
+                    <option value="年">年</option>
+                    <option value="天">天</option>
+                  </select>
+                </div>
+              </div>
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
+                <input type="text" id="logLocalLoc_${target.id}" placeholder="例如: Log Server、本機硬碟" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+              </div>
+            </div>
+          `;
+        } else {
+          localBackupHtml = `
+            <div class="space-y-4">
+              <h4 class="font-semibold text-gray-700 border-b pb-2">本地備份排程</h4>
+              
+              <div class="flex flex-col">
+                <label class="block text-sm font-medium text-gray-600 mb-1">每 ___ 執行「差異備份」</label>
+                <div class="flex">
+                  <input type="number" id="diffValue_${target.id}" min="0" placeholder="0代表無" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
+                  <select id="diffUnit_${target.id}" class="block w-full rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
+                    <option value="天">天</option><option value="週">週</option><option value="個月">個月</option><option value="年">年</option><option value="版本">版本</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="flex flex-col">
+                <label class="block text-sm font-medium text-gray-600 mb-1">每 ___ 執行「完整備份」 <span class="text-red-500">*</span></label>
+                <div class="flex">
+                  <input type="number" id="fullValue_${target.id}" min="1" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
+                  <select id="fullUnit_${target.id}" class="block w-full rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
+                    <option value="天">天</option><option value="週">週</option><option value="個月">個月</option><option value="年">年</option><option value="版本">版本</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="flex items-center">
+                <label class="block text-sm font-medium text-gray-600 mr-3">本地保留代數 <span class="text-red-500">*</span></label>
+                <input type="number" id="localRet_${target.id}" min="1" class="block w-20 rounded-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
+                <span class="ml-2 text-sm text-gray-500">代</span>
+              </div>
+
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
+                <input type="text" id="localLoc_${target.id}" placeholder="例如: 本機儲存區、NAS設備" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+              </div>
+            </div>
+          `;
+        }
+
+        html += `
+          <div class="target-card border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
+            <!-- 卡片標頭 (開關) -->
+            <label class="p-4 bg-gray-50 flex items-center justify-between border-b border-gray-200 cursor-pointer hover:bg-gray-100 transition">
+              <div class="flex items-center">
+                <input type="checkbox" id="check_${target.id}" onchange="toggleTarget('${target.id}')" class="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                <span class="ml-3 text-lg font-bold text-gray-700">${target.name}</span>
+              </div>
+              <span id="badge_${target.id}" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-200 text-gray-500 border border-gray-300">
+                無此標的
+              </span>
+            </label>
+
+            <!-- 卡片內容 (預設隱藏) -->
+            <div id="details_${target.id}" class="hidden-section p-6 bg-white">
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                
+                ${localBackupHtml}
+
+                <!-- 異地存放設定 -->
+                <div class="space-y-4 bg-purple-50 p-4 rounded-lg border border-purple-100">
+                  <div class="flex items-center justify-between border-b border-purple-200 pb-2">
+                    <h4 class="font-semibold text-purple-800">異地存放/備份設定</h4>
+                    <div class="flex items-center space-x-4 text-sm">
+                      <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="offsite_${target.id}" value="是" onchange="toggleOffsite('${target.id}', true)" class="form-radio text-purple-600">
+                        <span class="ml-1 text-purple-900">是</span>
+                      </label>
+                      <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="offsite_${target.id}" value="否" onchange="toggleOffsite('${target.id}', false)" checked class="form-radio text-purple-600">
+                        <span class="ml-1 text-purple-900">否</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- 異地隱藏區塊 -->
+                  <div id="offsiteSection_${target.id}" class="hidden-section space-y-4 pt-2">
+                    <div class="flex flex-col">
+                      <label class="block text-sm font-medium text-purple-800 mb-1">每 ___ 執行「異地存放」 <span class="text-red-500">*</span></label>
+                      <div class="flex">
+                        <input type="number" id="offsiteFreqValue_${target.id}" min="1" class="block w-20 rounded-l-md border-purple-300 shadow-sm p-2 border text-center focus:ring-purple-500">
+                        <select id="offsiteFreqUnit_${target.id}" class="block w-full rounded-r-md border-purple-300 shadow-sm p-2 border border-l-0 bg-white">
+                          <option value="天">天</option><option value="週">週</option><option value="個月">個月</option><option value="年">年</option><option value="版本">版本</option>
+                        </select>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label class="block text-sm font-medium text-purple-800 mb-1">異地存放地點 <span class="text-red-500">*</span></label>
+                      <input type="text" id="offsiteLoc_${target.id}" placeholder="例如: 國家高速網路中心" class="block w-full rounded-md border-purple-300 shadow-sm p-2 border focus:ring-purple-500">
+                    </div>
+
+                    <div class="flex items-center">
+                      <label class="block text-sm font-medium text-purple-800 mr-3">異地保留代數 <span class="text-red-500">*</span></label>
+                      <input type="number" id="offsiteRet_${target.id}" min="1" class="block w-20 rounded-md border-purple-300 shadow-sm p-2 border text-center focus:ring-purple-500">
+                      <span class="ml-2 text-sm text-purple-700">代</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    // 控制「個別標的」卡片的展開與必填邏輯
+    function toggleTarget(targetId) {
+      const elCheck = document.getElementById(`check_${targetId}`);
+      if (!elCheck) return;
+      
+      const isChecked = elCheck.checked;
+      const details = document.getElementById(`details_${targetId}`);
+      const badge = document.getElementById(`badge_${targetId}`);
+
+      if (isChecked) {
+        details.style.display = 'block';
+        badge.innerText = '已啟用並設定';
+        badge.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 border border-green-300';
+        
+        if (targetId === 'log') {
+          document.getElementById(`logRetVal_${targetId}`).required = true;
+          document.getElementById(`logLocalLoc_${targetId}`).required = true;
+        } else {
+          document.getElementById(`fullValue_${targetId}`).required = true;
+          document.getElementById(`localRet_${targetId}`).required = true;
+          document.getElementById(`localLoc_${targetId}`).required = true;
+        }
+      } else {
+        details.style.display = 'none';
+        badge.innerText = '無此標的';
+        badge.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-200 text-gray-500 border border-gray-300';
+        
+        if (targetId === 'log') {
+          document.getElementById(`logRetVal_${targetId}`).required = false;
+          document.getElementById(`logLocalLoc_${targetId}`).required = false;
+        } else {
+          document.getElementById(`fullValue_${targetId}`).required = false;
+          document.getElementById(`localRet_${targetId}`).required = false;
+          document.getElementById(`localLoc_${targetId}`).required = false;
+        }
+        
+        document.querySelector(`input[name="offsite_${targetId}"][value="否"]`).checked = true;
+        toggleOffsite(targetId, false);
+      }
+    }
+
+    // 控制個別標的內的「異地存放」區塊顯示與必填邏輯
+    function toggleOffsite(targetId, show) {
+      const section = document.getElementById(`offsiteSection_${targetId}`);
+      if(!section) return;
+      
+      const inputs = section.querySelectorAll('input');
+      if (show) {
+        section.style.display = 'block';
+        inputs.forEach(input => input.required = true);
+      } else {
+        section.style.display = 'none';
+        inputs.forEach(input => input.required = false);
+      }
+    }
+
+    // 處理表單送出
+    function handleFormSubmit(event) {
+      event.preventDefault();
+      
+      const submitBtn = document.getElementById('submitBtn');
+      const statusMessage = document.getElementById('statusMessage');
+      const systemId = document.getElementById('systemId').value;
+      
+      const activeTargets = backupTargets.filter(t => document.getElementById(`check_${t.id}`).checked);
+      
+      if (activeTargets.length === 0) {
+        alert("請至少勾選一項「備份標的」進行設定！");
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerText = '資料處理中...';
+      submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+      const targetsData = activeTargets.map(t => {
+        const isOffsite = document.querySelector(`input[name="offsite_${t.id}"]:checked`).value;
+        let logRetention = '';
+        if (t.id === 'log') {
+          logRetention = '保存 ' + document.getElementById(`logRetVal_${t.id}`).value + ' ' + document.getElementById(`logRetUnit_${t.id}`).value;
+        }
+
+        return {
+          targetName: t.name,
+          localDiffValue: t.id !== 'log' ? (document.getElementById(`diffValue_${t.id}`).value || '0') : 'N/A',
+          localDiffUnit: t.id !== 'log' ? document.getElementById(`diffUnit_${t.id}`).value : '',
+          localFullValue: t.id !== 'log' ? document.getElementById(`fullValue_${t.id}`).value : 'N/A',
+          localFullUnit: t.id !== 'log' ? document.getElementById(`fullUnit_${t.id}`).value : '',
+          localRetention: t.id !== 'log' ? document.getElementById(`localRet_${t.id}`).value : 'N/A',
+          localLocation: t.id !== 'log' ? document.getElementById(`localLoc_${t.id}`).value : document.getElementById(`logLocalLoc_${t.id}`).value,
+          logRetention: logRetention,
+          isOffsite: isOffsite,
+          offsiteFreqValue: isOffsite === '是' ? document.getElementById(`offsiteFreqValue_${t.id}`).value : '',
+          offsiteFreqUnit: isOffsite === '是' ? document.getElementById(`offsiteFreqUnit_${t.id}`).value : '',
+          offsiteLocation: isOffsite === '是' ? document.getElementById(`offsiteLoc_${t.id}`).value : '',
+          offsiteRetention: isOffsite === '是' ? document.getElementById(`offsiteRet_${t.id}`).value : ''
+        };
+      });
+
+      const formData = {
+        id: systemId || Date.now().toString(), // 如果有 ID 就更新，否則產生新 ID
+        systemName: document.getElementById('systemName').value,
+        systemLevel: document.getElementById('systemLevel').value,
+        managerName: document.getElementById('managerName').value,
+        targets: targetsData
+      };
+
+      // --- 本地模擬更新邏輯 ---
+      if (systemId) {
+        // 更新模式
+        const index = appData.findIndex(s => s.id === systemId);
+        if(index !== -1) appData[index] = formData;
+      } else {
+        // 新增模式
+        appData.push(formData);
+      }
+      
+      // 儲存至本地端，確保重新整理後資料還在
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+
+      // --- 呼叫後端 Google Apps Script (如果存在) ---
+      if (typeof google !== 'undefined' && google.script) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            handleSuccess(response.message || '資料已成功寫入後端與本地！');
+          })
+          .withFailureHandler(function(error) {
+            handleError('連線失敗，但資料已暫存於本地。');
+          })
+          .submitData(formData);
+      } else {
+        // 如果是在本地測試，沒有 google.script，直接模擬成功
+        setTimeout(() => {
+          handleSuccess(systemId ? '系統設定已成功更新！' : '資料已成功新增！');
+        }, 500);
+      }
+
+      // 內部成功處理函數
+      function handleSuccess(msg) {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        
+        statusMessage.classList.remove('hidden', 'bg-red-100', 'text-red-700');
+        statusMessage.classList.add('bg-green-100', 'text-green-800', 'border', 'border-green-300');
+        statusMessage.innerText = msg;
+        
+        setTimeout(() => { 
+          statusMessage.classList.add('hidden'); 
+          resetForm();
+          switchTab('dashboard'); // 送出成功後自動跳轉回儀表板
+        }, 1500);
+      }
+
+      // 內部錯誤處理函數
+      function handleError(msg) {
+        submitBtn.disabled = false;
+        submitBtn.innerText = systemId ? '更新儲存紀錄' : '儲存並送出紀錄';
+        submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        
+        statusMessage.classList.remove('hidden', 'bg-green-100', 'text-green-800');
+        statusMessage.classList.add('bg-red-100', 'text-red-800', 'border', 'border-red-300');
+        statusMessage.innerText = msg;
+      }
+    }
+  </script>
+</body>
+</html>
