@@ -267,9 +267,14 @@ function parseRetentionCount(rawValue) {
 // 4. 讀取資訊資產（僅 B 欄為 HW），回傳「A欄 + C欄」供前端下拉搜尋
 function getAssetOptions() {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_ASSETS_NAME);
+    if (typeof ASSETS_SPREADSHEET_ID === 'undefined' || !String(ASSETS_SPREADSHEET_ID).trim() || ASSETS_SPREADSHEET_ID === 'PLEASE_SET_ASSETS_SPREADSHEET_ID') {
+      return { success: false, message: "尚未設定外部資訊資產 Google Sheet ID（ASSETS_SPREADSHEET_ID）。", data: [] };
+    }
+
+    const assetsSpreadsheet = SpreadsheetApp.openById(String(ASSETS_SPREADSHEET_ID).trim());
+    const sheet = assetsSpreadsheet.getSheetByName(SHEET_ASSETS_NAME);
     if (!sheet) {
-      return { success: false, message: "找不到資訊資產工作表。", data: [] };
+      return { success: false, message: "在外部試算表中找不到「資訊資產」工作表。", data: [] };
     }
 
     const lastRow = sheet.getLastRow();
