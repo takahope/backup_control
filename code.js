@@ -428,9 +428,7 @@ function generateBackupControlDocument() {
       ]);
     });
 
-    body.appendParagraph('');
-    body.appendParagraph('備份資訊明細表').setBold(true).setFontSize(12);
-    const table = body.appendTable(tableData);
+    const table = insertTableAtPlaceholder_(body, tableData);
     styleGeneratedTable_(table);
 
     doc.saveAndClose();
@@ -465,6 +463,41 @@ function styleGeneratedTable_(table) {
       }
     }
   }
+}
+
+function insertTableAtPlaceholder_(body, tableData) {
+  const placeholderPattern = '\\{\\{表格\\}\\}';
+  const found = body.findText(placeholderPattern);
+
+  if (!found) {
+    body.appendParagraph('');
+    body.appendParagraph('備份資訊明細表').setBold(true).setFontSize(12);
+    return body.appendTable(tableData);
+  }
+
+  const textElement = found.getElement().asText();
+  const start = found.getStartOffset();
+  const end = found.getEndOffsetInclusive();
+  textElement.deleteText(start, end);
+
+  let paragraph = textElement.getParent();
+  while (paragraph && paragraph.getType() !== DocumentApp.ElementType.PARAGRAPH) {
+    paragraph = paragraph.getParent();
+  }
+
+  if (!paragraph) {
+    return body.appendTable(tableData);
+  }
+
+  const paragraphText = paragraph.asParagraph().getText().trim();
+  const index = body.getChildIndex(paragraph);
+  const table = body.insertTable(index + 1, tableData);
+
+  if (!paragraphText) {
+    body.removeChild(paragraph);
+  }
+
+  return table;
 }
 
 function createRecordNo_() {
