@@ -84,6 +84,25 @@
         </div>
       </div>
 
+      <!-- 儀表板載入進度 -->
+      <div id="dashboardLoading" class="hidden mb-4 p-3 bg-white border border-blue-100 rounded-lg" aria-live="polite">
+        <div class="flex justify-between items-center text-sm text-blue-700 mb-2">
+          <span>載入中...</span>
+          <span id="dashboardLoadingText">0%</span>
+        </div>
+        <div class="w-full h-2 bg-blue-100 rounded-full overflow-hidden">
+          <div
+            id="dashboardLoadingBar"
+            class="h-full bg-blue-600 transition-all duration-200"
+            style="width: 0%;"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          ></div>
+        </div>
+      </div>
+
       <!-- 系統卡片網格 -->
       <div id="systemCardsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <!-- JS 將在此處渲染系統卡片 -->
@@ -169,6 +188,8 @@
     // --- 狀態管理 (使用 LocalStorage 模擬後端資料庫) ---
     const STORAGE_KEY = 'isms_backup_records';
     let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    let dashboardLoadProgress = 0;
+    let dashboardLoadTimer = null;
 
     // --- 安全工具：避免將使用者輸入直接注入 innerHTML ---
     function escapeHtml(value) {
@@ -243,11 +264,14 @@
     // --- 初始化應用程式 ---
     document.addEventListener('DOMContentLoaded', () => {
       renderFormTargets();
-      loadDashboardData();
+      loadDashboardData({ showProgress: true });
     });
 
     // --- 優先從後端讀取資料；若失敗則回退到本地快取 ---
-    function loadDashboardData() {
+    function loadDashboardData(options = {}) {
+      const showProgress = Boolean(options.showProgress);
+      if (showProgress) startDashboardLoading();
+
       if (typeof google !== 'undefined' && google.script) {
         google.script.run
           .withSuccessHandler(function(response) {
@@ -257,17 +281,78 @@
             } else {
               appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
             }
+            if (showProgress) {
+              finishDashboardLoading();
+            }
             renderDashboard();
           })
           .withFailureHandler(function() {
             appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+            if (showProgress) {
+              finishDashboardLoading();
+            }
             renderDashboard();
           })
           .getDashboardData();
       } else {
         appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+        if (showProgress) {
+          finishDashboardLoading();
+        }
         renderDashboard();
       }
+    }
+
+    function setDashboardLoadingProgress(value) {
+      const clamped = Math.max(0, Math.min(100, Number(value) || 0));
+      dashboardLoadProgress = clamped;
+
+      const bar = document.getElementById('dashboardLoadingBar');
+      const text = document.getElementById('dashboardLoadingText');
+      if (bar) {
+        bar.style.width = `${clamped}%`;
+        bar.setAttribute('aria-valuenow', String(clamped));
+      }
+      if (text) {
+        text.innerText = `${clamped}%`;
+      }
+    }
+
+    function startDashboardLoading() {
+      const loading = document.getElementById('dashboardLoading');
+      if (loading) {
+        loading.classList.remove('hidden');
+      }
+
+      if (dashboardLoadTimer) {
+        clearInterval(dashboardLoadTimer);
+        dashboardLoadTimer = null;
+      }
+
+      setDashboardLoadingProgress(0);
+      dashboardLoadTimer = setInterval(() => {
+        if (dashboardLoadProgress >= 90) {
+          clearInterval(dashboardLoadTimer);
+          dashboardLoadTimer = null;
+          return;
+        }
+        setDashboardLoadingProgress(dashboardLoadProgress + 4);
+      }, 80);
+    }
+
+    function finishDashboardLoading() {
+      if (dashboardLoadTimer) {
+        clearInterval(dashboardLoadTimer);
+        dashboardLoadTimer = null;
+      }
+
+      setDashboardLoadingProgress(100);
+      setTimeout(() => {
+        const loading = document.getElementById('dashboardLoading');
+        if (loading) {
+          loading.classList.add('hidden');
+        }
+      }, 250);
     }
 
     // --- 視圖切換邏輯 ---
