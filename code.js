@@ -80,7 +80,7 @@ function submitData(formData) {
                             ? target.localDiffValue + ' ' + target.localDiffUnit 
                             : '無';
         fullDisplay = target.localFullValue + ' ' + target.localFullUnit;
-        retentionDisplay = target.localRetention + ' 代';
+        retentionDisplay = target.localRetention === 'ALL' ? '全部保留' : (target.localRetention + ' 代');
       }
 
       // 組合單列資料 (需對應您的試算表表頭順序)
@@ -258,6 +258,7 @@ function splitCycleValue(rawValue, fallbackUnit) {
 
 function parseRetentionCount(rawValue) {
   const text = String(rawValue || '').trim();
+  if (text === '全部保留') return 'ALL';
   const match = text.match(/(\d+)/);
   return match ? match[1] : '';
 }

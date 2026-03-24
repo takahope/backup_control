@@ -215,6 +215,7 @@
 
     function formatRetention(value) {
       const v = String(value ?? '').trim();
+      if (v === 'ALL' || v === '全部保留') return '全部保留';
       if (!v || v === 'N/A' || v === '無') return '無';
       return escapeHtml(v.endsWith('代') || v.includes('保存') ? v : `${v} 代`);
     }
@@ -538,7 +539,10 @@
             document.getElementById(`diffUnit_${tid}`).value = tData.localDiffUnit;
             document.getElementById(`fullValue_${tid}`).value = tData.localFullValue === 'N/A' ? '' : tData.localFullValue;
             document.getElementById(`fullUnit_${tid}`).value = tData.localFullUnit;
-            document.getElementById(`localRet_${tid}`).value = tData.localRetention === 'N/A' ? '' : tData.localRetention;
+            const isAllRetention = String(tData.localRetention || '').trim() === 'ALL' || String(tData.localRetention || '').trim() === '全部保留';
+            document.getElementById(`localRetAll_${tid}`).checked = isAllRetention;
+            document.getElementById(`localRet_${tid}`).value = (!isAllRetention && tData.localRetention !== 'N/A') ? tData.localRetention : '';
+            toggleLocalRetentionMode(tid);
             document.getElementById(`localLoc_${tid}`).value = tData.localLocation;
           }
 
@@ -639,6 +643,10 @@
                 <input type="number" id="localRet_${target.id}" min="1" class="block w-20 rounded-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
                 <span class="ml-2 text-sm text-gray-500">代</span>
               </div>
+              <label class="inline-flex items-center text-sm text-gray-600">
+                <input type="checkbox" id="localRetAll_${target.id}" onchange="toggleLocalRetentionMode('${target.id}')" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+                <span class="ml-2">保留所有版本（全部保留）</span>
+              </label>
 
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
@@ -735,7 +743,8 @@
           document.getElementById(`logLocalLoc_${targetId}`).required = true;
         } else {
           document.getElementById(`fullValue_${targetId}`).required = true;
-          document.getElementById(`localRet_${targetId}`).required = true;
+          const isAllRetention = document.getElementById(`localRetAll_${targetId}`).checked;
+          document.getElementById(`localRet_${targetId}`).required = !isAllRetention;
           document.getElementById(`localLoc_${targetId}`).required = true;
         }
       } else {
@@ -750,10 +759,28 @@
           document.getElementById(`fullValue_${targetId}`).required = false;
           document.getElementById(`localRet_${targetId}`).required = false;
           document.getElementById(`localLoc_${targetId}`).required = false;
+          document.getElementById(`localRetAll_${targetId}`).checked = false;
+          toggleLocalRetentionMode(targetId);
         }
         
         document.querySelector(`input[name="offsite_${targetId}"][value="否"]`).checked = true;
         toggleOffsite(targetId, false);
+      }
+    }
+
+    function toggleLocalRetentionMode(targetId) {
+      const allRetentionCheckbox = document.getElementById(`localRetAll_${targetId}`);
+      const localRetentionInput = document.getElementById(`localRet_${targetId}`);
+      const targetCheckbox = document.getElementById(`check_${targetId}`);
+      if (!allRetentionCheckbox || !localRetentionInput || !targetCheckbox) return;
+
+      const isAllRetention = allRetentionCheckbox.checked;
+      localRetentionInput.disabled = isAllRetention;
+      localRetentionInput.required = !isAllRetention && targetCheckbox.checked;
+      localRetentionInput.classList.toggle('bg-gray-100', isAllRetention);
+      localRetentionInput.classList.toggle('text-gray-400', isAllRetention);
+      if (isAllRetention) {
+        localRetentionInput.value = '';
       }
     }
 
@@ -804,7 +831,9 @@
           localDiffUnit: t.id !== 'log' ? document.getElementById(`diffUnit_${t.id}`).value : '',
           localFullValue: t.id !== 'log' ? document.getElementById(`fullValue_${t.id}`).value : 'N/A',
           localFullUnit: t.id !== 'log' ? document.getElementById(`fullUnit_${t.id}`).value : '',
-          localRetention: t.id !== 'log' ? document.getElementById(`localRet_${t.id}`).value : 'N/A',
+          localRetention: t.id !== 'log'
+            ? (document.getElementById(`localRetAll_${t.id}`).checked ? 'ALL' : document.getElementById(`localRet_${t.id}`).value)
+            : 'N/A',
           localLocation: t.id !== 'log' ? document.getElementById(`localLoc_${t.id}`).value : document.getElementById(`logLocalLoc_${t.id}`).value,
           logRetention: logRetention,
           isOffsite: isOffsite,
