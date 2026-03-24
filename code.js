@@ -313,9 +313,13 @@ function getAssetOptions() {
       const colA = String(row[0] || '').trim();
       const colB = String(row[1] || '').trim();
       const colC = String(row[2] || '').trim();
-      const normalizedType = colB.replace(/Ｈ/g, 'H').replace(/Ｗ/g, 'W').toUpperCase();
+      const normalizedType = colB
+        .replace(/Ｓ/g, 'S')
+        .replace(/Ｈ/g, 'H')
+        .replace(/Ｗ/g, 'W')
+        .toUpperCase();
 
-      if (normalizedType !== 'HW') return;
+      if (normalizedType !== 'HW' && normalizedType !== 'SW') return;
       if (!colA && !colC) return;
 
       const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
