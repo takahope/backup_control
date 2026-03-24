@@ -356,14 +356,16 @@ function generateBackupControlDocument() {
       return { success: false, message: "找不到資料來源工作表（工作表1）。" };
     }
 
-    const recordNo = createRecordNo_();
-    const now = new Date();
-    const year = String(now.getFullYear());
-    const month = String(now.getMonth() + 1);
-    const day = String(now.getDate());
-
     const templateFile = DriveApp.getFileById(String(FORM_TEMPLATE_DOC_ID).trim());
-    const outputFolder = DriveApp.getFolderById(String(FORM_OUTPUT_FOLDER_ID).trim());
+    const outputFolderId = String(FORM_OUTPUT_FOLDER_ID).trim();
+    const outputFolder = DriveApp.getFolderById(outputFolderId);
+
+    const now = new Date();
+    const dateKey = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
+    const year = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy');
+    const month = Utilities.formatDate(now, Session.getScriptTimeZone(), 'MM');
+    const day = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd');
+    const recordNo = createRecordNoFromFolder_(outputFolder, dateKey);
     const newFileName = '備份管制表單_' + recordNo;
     const copiedFile = templateFile.makeCopy(newFileName, outputFolder);
 
@@ -500,15 +502,34 @@ function insertTableAtPlaceholder_(body, tableData) {
   return table;
 }
 
-function createRecordNo_() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = ('0' + (now.getMonth() + 1)).slice(-2);
-  const d = ('0' + now.getDate()).slice(-2);
-  const hh = ('0' + now.getHours()).slice(-2);
-  const mm = ('0' + now.getMinutes()).slice(-2);
-  const ss = ('0' + now.getSeconds()).slice(-2);
-  return 'REC-' + y + m + d + '-' + hh + mm + ss;
+function createRecordNoFromFolder_(folder, dateKey) {
+  const prefix = (typeof RECORD_NUMBER_PREFIX !== 'undefined' && String(RECORD_NUMBER_PREFIX).trim())
+    ? String(RECORD_NUMBER_PREFIX).trim()
+    : 'IS-R-032';
+  const escapedPrefix = escapeRegExp_(prefix);
+  const pattern = new RegExp(escapedPrefix + '-' + dateKey + '-(\\d+)');
+
+  let maxSerial = 0;
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    const name = String(file.getName() || '').trim();
+    const match = name.match(pattern);
+    if (!match) continue;
+
+    const serial = parseInt(match[1], 10);
+    if (!isNaN(serial) && serial > maxSerial) {
+      maxSerial = serial;
+    }
+  }
+
+  const nextSerial = maxSerial + 1;
+  const serialText = nextSerial < 100 ? ('0' + nextSerial).slice(-2) : String(nextSerial);
+  return prefix + '-' + dateKey + '-' + serialText;
+}
+
+function escapeRegExp_(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function formatCellValue_(value) {

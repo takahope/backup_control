@@ -8,3 +8,6 @@ const FORM_TEMPLATE_DOC_ID = '1r8BRAlwn-iUIhOIatc';
 
 // 生成文件要存放的 Google Drive 資料夾 ID
 const FORM_OUTPUT_FOLDER_ID = '1BFBRcaX_OeV';
+
+// 紀錄編號前綴
+const RECORD_NUMBER_PREFIX = 'IS-R-032';
