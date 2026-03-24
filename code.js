@@ -372,10 +372,12 @@ function generateBackupControlDocument() {
     const doc = DocumentApp.openById(copiedFile.getId());
     const body = doc.getBody();
 
-    body.replaceText('\\{\\{年\\}\\}', year);
-    body.replaceText('\\{\\{月\\}\\}', month);
-    body.replaceText('\\{\\{日\\}\\}', day);
-    body.replaceText('\\{\\{紀錄編號\\}\\}', recordNo);
+    replaceTemplateTokens_(doc, {
+      '年': year,
+      '月': month,
+      '日': day,
+      '紀錄編號': recordNo
+    });
 
     const lastRow = sourceSheet.getLastRow();
     if (lastRow <= 1) {
@@ -500,6 +502,19 @@ function insertTableAtPlaceholder_(body, tableData) {
   }
 
   return table;
+}
+
+function replaceTemplateTokens_(doc, tokenMap) {
+  const sections = [doc.getBody(), doc.getHeader(), doc.getFooter()].filter(Boolean);
+  const keys = Object.keys(tokenMap || {});
+
+  sections.forEach(function(section) {
+    keys.forEach(function(key) {
+      // 支援 {{年}} 與 {{ 年 }} 這種帶空白寫法
+      const pattern = '\\{\\{\\s*' + escapeRegExp_(key) + '\\s*\\}\\}';
+      section.replaceText(pattern, String(tokenMap[key]));
+    });
+  });
 }
 
 function createRecordNoFromFolder_(folder, dateKey) {
