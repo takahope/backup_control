@@ -131,6 +131,8 @@
         </div>
         
         <form id="backupForm" onsubmit="handleFormSubmit(event)">
+          <datalist id="assetOptionsList"></datalist>
+
           <!-- 隱藏的 ID 欄位，用於判斷是新增還是更新 -->
           <input type="hidden" id="systemId" value="">
           
@@ -188,6 +190,7 @@
     // --- 狀態管理 (使用 LocalStorage 模擬後端資料庫) ---
     const STORAGE_KEY = 'isms_backup_records';
     let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    let assetOptions = [];
     let dashboardLoadProgress = 0;
     let dashboardLoadTimer = null;
 
@@ -265,8 +268,63 @@
     // --- 初始化應用程式 ---
     document.addEventListener('DOMContentLoaded', () => {
       renderFormTargets();
+      loadAssetOptions();
       loadDashboardData({ showProgress: true });
     });
+
+    function renderAssetOptionsDatalist() {
+      const list = document.getElementById('assetOptionsList');
+      if (!list) return;
+
+      list.innerHTML = '';
+      assetOptions.forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        list.appendChild(option);
+      });
+    }
+
+    function loadAssetOptions() {
+      if (typeof google !== 'undefined' && google.script) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            if (response && response.success && Array.isArray(response.data)) {
+              assetOptions = response.data;
+            } else {
+              assetOptions = [];
+            }
+            renderAssetOptionsDatalist();
+          })
+          .withFailureHandler(function() {
+            assetOptions = [];
+            renderAssetOptionsDatalist();
+          })
+          .getAssetOptions();
+      } else {
+        // 本地測試時沒有 Apps Script 後端，保留空清單
+        assetOptions = [];
+        renderAssetOptionsDatalist();
+      }
+    }
+
+    function validateLocalLocationSelection(activeTargets) {
+      if (!Array.isArray(assetOptions) || assetOptions.length === 0) return true;
+
+      for (const t of activeTargets) {
+        const inputId = t.id === 'log' ? `logLocalLoc_${t.id}` : `localLoc_${t.id}`;
+        const input = document.getElementById(inputId);
+        if (!input) continue;
+
+        const value = String(input.value || '').trim();
+        if (!value) continue; // required 屬性會先擋空值
+        if (!assetOptions.includes(value)) {
+          alert(`「${t.name}」的本地存放地點/設備請從下拉選單選擇有效的資訊資產。`);
+          input.focus();
+          return false;
+        }
+      }
+      return true;
+    }
 
     // --- 優先從後端讀取資料；若失敗則回退到本地快取 ---
     function loadDashboardData(options = {}) {
@@ -609,7 +667,7 @@
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
-                <input type="text" id="logLocalLoc_${target.id}" placeholder="例如: Log Server、本機硬碟" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                <input type="search" list="assetOptionsList" id="logLocalLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
               </div>
             </div>
           `;
@@ -650,7 +708,7 @@
 
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
-                <input type="text" id="localLoc_${target.id}" placeholder="例如: 本機儲存區、NAS設備" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                <input type="search" list="assetOptionsList" id="localLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
               </div>
             </div>
           `;
@@ -811,6 +869,9 @@
       
       if (activeTargets.length === 0) {
         alert("請至少勾選一項「備份標的」進行設定！");
+        return;
+      }
+      if (!validateLocalLocationSelection(activeTargets)) {
         return;
       }
 

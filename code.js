@@ -1,5 +1,6 @@
 // Code.gs - 處理網頁請求與寫入 Google Sheets
 const SHEET_NAME = '工作表1'; // 請確認您的 Google Sheet 分頁名稱是否為此
+const SHEET_ASSETS_NAME = '資訊資產';
 
 // 定義正確的表頭陣列 (新增 '本地_存放地點')
 const EXPECTED_HEADERS = [
@@ -261,4 +262,44 @@ function parseRetentionCount(rawValue) {
   if (text === '全部保留') return 'ALL';
   const match = text.match(/(\d+)/);
   return match ? match[1] : '';
+}
+
+// 4. 讀取資訊資產（僅 B 欄為 HW），回傳「A欄 + C欄」供前端下拉搜尋
+function getAssetOptions() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_ASSETS_NAME);
+    if (!sheet) {
+      return { success: false, message: "找不到資訊資產工作表。", data: [] };
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      return { success: true, data: [] };
+    }
+
+    const values = sheet.getRange(2, 1, lastRow - 1, 3).getValues(); // A,B,C
+    const options = [];
+    const seen = {};
+
+    values.forEach(function(row) {
+      const colA = String(row[0] || '').trim();
+      const colB = String(row[1] || '').trim();
+      const colC = String(row[2] || '').trim();
+      const normalizedType = colB.replace(/Ｈ/g, 'H').replace(/Ｗ/g, 'W').toUpperCase();
+
+      if (normalizedType !== 'HW') return;
+      if (!colA && !colC) return;
+
+      const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
+      if (!seen[name]) {
+        seen[name] = true;
+        options.push(name);
+      }
+    });
+
+    options.sort();
+    return { success: true, data: options };
+  } catch (error) {
+    return { success: false, message: error.toString(), data: [] };
+  }
 }
