@@ -336,6 +336,156 @@ function getAssetOptions() {
   }
 }
 
+// 5. 一鍵生成備份管制表單（Google Doc 範本 + Sheet 資料表格）
+function generateBackupControlDocument() {
+  try {
+    const permission = checkAppPermission_();
+    if (!permission.allowed) {
+      return { success: false, message: permission.message || '無權限產生文件。' };
+    }
+
+    if (typeof FORM_TEMPLATE_DOC_ID === 'undefined' || !String(FORM_TEMPLATE_DOC_ID).trim() || FORM_TEMPLATE_DOC_ID === 'PLEASE_SET_FORM_TEMPLATE_DOC_ID') {
+      return { success: false, message: '尚未設定 FORM_TEMPLATE_DOC_ID。' };
+    }
+    if (typeof FORM_OUTPUT_FOLDER_ID === 'undefined' || !String(FORM_OUTPUT_FOLDER_ID).trim() || FORM_OUTPUT_FOLDER_ID === 'PLEASE_SET_FORM_OUTPUT_FOLDER_ID') {
+      return { success: false, message: '尚未設定 FORM_OUTPUT_FOLDER_ID。' };
+    }
+
+    const sourceSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+    if (!sourceSheet) {
+      return { success: false, message: "找不到資料來源工作表（工作表1）。" };
+    }
+
+    const recordNo = createRecordNo_();
+    const now = new Date();
+    const year = String(now.getFullYear());
+    const month = String(now.getMonth() + 1);
+    const day = String(now.getDate());
+
+    const templateFile = DriveApp.getFileById(String(FORM_TEMPLATE_DOC_ID).trim());
+    const outputFolder = DriveApp.getFolderById(String(FORM_OUTPUT_FOLDER_ID).trim());
+    const newFileName = '備份管制表單_' + recordNo;
+    const copiedFile = templateFile.makeCopy(newFileName, outputFolder);
+
+    const doc = DocumentApp.openById(copiedFile.getId());
+    const body = doc.getBody();
+
+    body.replaceText('\\{\\{年\\}\\}', year);
+    body.replaceText('\\{\\{月\\}\\}', month);
+    body.replaceText('\\{\\{日\\}\\}', day);
+    body.replaceText('\\{\\{紀錄編號\\}\\}', recordNo);
+
+    const lastRow = sourceSheet.getLastRow();
+    if (lastRow <= 1) {
+      body.appendParagraph('目前沒有可匯出的備份資料。').setForegroundColor('#6b7280');
+      doc.saveAndClose();
+      return { success: true, message: '文件已生成（目前無資料列）。', url: doc.getUrl(), fileId: copiedFile.getId(), recordNo: recordNo };
+    }
+
+    const values = sourceSheet.getRange(2, 1, lastRow - 1, EXPECTED_HEADERS.length).getValues();
+    const tableData = [];
+    tableData.push(['項次', '系統/設備名稱', '是否備份', '備份標的及週期', '備份方式', '系統管理人員']);
+
+    values.forEach(function(row, idx) {
+      const timestamp = formatCellValue_(row[0]);
+      const systemName = formatCellValue_(row[1]);
+      const systemLevel = formatCellValue_(row[2]);
+      const backupTarget = formatCellValue_(row[3]);
+      const localDiff = formatCellValue_(row[4]);
+      const localFull = formatCellValue_(row[5]);
+      const localRetention = formatCellValue_(row[6]);
+      const localLocation = formatCellValue_(row[7]);
+      const isOffsite = formatCellValue_(row[8]);
+      const offsiteCycle = formatCellValue_(row[9]);
+      const offsiteLocation = formatCellValue_(row[10]);
+      const offsiteRetention = formatCellValue_(row[11]);
+      const manager = formatCellValue_(row[12]);
+
+      const col2 = systemName + (systemLevel ? ('（' + systemLevel + '）') : '');
+      const col3 = backupTarget && backupTarget !== '無' ? '是' : '否';
+      const col4 = [
+        '備份標的：' + backupTarget,
+        '差異週期：' + localDiff,
+        '完整週期：' + localFull,
+        '異地週期：' + offsiteCycle
+      ].join('\n');
+      const col5 = [
+        '本地存放：' + localLocation,
+        '本地保留：' + localRetention,
+        '異地備份：' + isOffsite,
+        '異地地點：' + offsiteLocation,
+        '異地保留：' + offsiteRetention,
+        '時間戳記：' + timestamp
+      ].join('\n');
+
+      tableData.push([
+        String(idx + 1),
+        col2,
+        col3,
+        col4,
+        col5,
+        manager
+      ]);
+    });
+
+    body.appendParagraph('');
+    body.appendParagraph('備份資訊明細表').setBold(true).setFontSize(12);
+    const table = body.appendTable(tableData);
+    styleGeneratedTable_(table);
+
+    doc.saveAndClose();
+    return {
+      success: true,
+      message: '文件已成功生成。',
+      url: doc.getUrl(),
+      fileId: copiedFile.getId(),
+      recordNo: recordNo
+    };
+  } catch (error) {
+    return { success: false, message: error.toString() };
+  }
+}
+
+function styleGeneratedTable_(table) {
+  if (!table) return;
+
+  const rowCount = table.getNumRows();
+  for (let r = 0; r < rowCount; r++) {
+    const row = table.getRow(r);
+    const cellCount = row.getNumCells();
+    for (let c = 0; c < cellCount; c++) {
+      const cell = row.getCell(c);
+      cell.setPaddingTop(6).setPaddingBottom(6).setPaddingLeft(6).setPaddingRight(6);
+      if (r === 0) {
+        cell.setBackgroundColor('#e5e7eb');
+        cell.editAsText().setBold(true).setForegroundColor('#111827');
+      } else {
+        cell.setBackgroundColor('#ffffff');
+        cell.editAsText().setBold(false).setForegroundColor('#1f2937');
+      }
+    }
+  }
+}
+
+function createRecordNo_() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = ('0' + (now.getMonth() + 1)).slice(-2);
+  const d = ('0' + now.getDate()).slice(-2);
+  const hh = ('0' + now.getHours()).slice(-2);
+  const mm = ('0' + now.getMinutes()).slice(-2);
+  const ss = ('0' + now.getSeconds()).slice(-2);
+  return 'REC-' + y + m + d + '-' + hh + mm + ss;
+}
+
+function formatCellValue_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
+  }
+  const text = String(value == null ? '' : value).trim();
+  return text || 'N/A';
+}
+
 function checkAppPermission_() {
   try {
     const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();

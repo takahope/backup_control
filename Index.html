@@ -78,9 +78,14 @@
       <!-- 系統列表 Header -->
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-gray-800">系統備份設定一覽</h2>
-        <div class="relative">
-          <input type="text" id="searchInput" placeholder="搜尋系統名稱..." onkeyup="renderDashboard()" class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 shadow-sm w-64">
-          <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        <div class="flex items-center gap-3">
+          <button id="generateDocBtn" onclick="generateBackupFormDoc()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2 px-4 rounded-lg shadow-sm transition">
+            一鍵生成表單
+          </button>
+          <div class="relative">
+            <input type="text" id="searchInput" placeholder="搜尋系統名稱..." onkeyup="renderDashboard()" class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 shadow-sm w-64">
+            <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
         </div>
       </div>
 
@@ -304,6 +309,48 @@
         // 本地測試時沒有 Apps Script 後端，保留空清單
         assetOptions = [];
         renderAssetOptionsDatalist();
+      }
+    }
+
+    function generateBackupFormDoc() {
+      const btn = document.getElementById('generateDocBtn');
+      if (!btn) return;
+
+      const originalText = btn.innerText;
+      btn.disabled = true;
+      btn.classList.add('opacity-60', 'cursor-not-allowed');
+      btn.innerText = '產生中...';
+
+      if (typeof google !== 'undefined' && google.script) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            btn.disabled = false;
+            btn.classList.remove('opacity-60', 'cursor-not-allowed');
+            btn.innerText = originalText;
+
+            if (!response || !response.success) {
+              alert((response && response.message) ? response.message : '表單生成失敗。');
+              return;
+            }
+
+            const message = `文件已生成（紀錄編號：${response.recordNo || '-'}）`;
+            alert(message);
+            if (response.url) {
+              window.open(response.url, '_blank');
+            }
+          })
+          .withFailureHandler(function(error) {
+            btn.disabled = false;
+            btn.classList.remove('opacity-60', 'cursor-not-allowed');
+            btn.innerText = originalText;
+            alert('生成文件失敗：' + (error && error.message ? error.message : '未知錯誤'));
+          })
+          .generateBackupControlDocument();
+      } else {
+        btn.disabled = false;
+        btn.classList.remove('opacity-60', 'cursor-not-allowed');
+        btn.innerText = originalText;
+        alert('目前不在 Apps Script 環境，無法生成文件。');
       }
     }
 
