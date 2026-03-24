@@ -1,6 +1,7 @@
 // Code.gs - 處理網頁請求與寫入 Google Sheets
 const SHEET_NAME = '工作表1'; // 請確認您的 Google Sheet 分頁名稱是否為此
 const SHEET_ASSETS_NAME = '資訊資產';
+const SHEET_PERMISSIONS_NAME = '權限';
 
 // 定義正確的表頭陣列 (新增 '本地_存放地點')
 const EXPECTED_HEADERS = [
@@ -11,6 +12,13 @@ const EXPECTED_HEADERS = [
 
 // 1. 輸出前端 HTML 網頁
 function doGet(e) {
+  const permission = checkAppPermission_();
+  if (!permission.allowed) {
+    return HtmlService.createHtmlOutput(
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>無權限存取</title></head><body style="font-family:sans-serif;background:#f3f4f6;padding:24px;"><div style="max-width:680px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;"><h2 style="margin:0 0 12px 0;color:#b91c1c;">無權限存取</h2><p style="color:#374151;line-height:1.7;">您目前沒有此系統的使用權限。請聯繫系統管理員，將您的帳號加入「權限」工作表 B 欄白名單。</p><p style="color:#6b7280;font-size:13px;margin-top:12px;">' + sanitizeHtml_(permission.message || '') + '</p></div></body></html>'
+    ).setTitle('無權限存取');
+  }
+
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('ISMS 備份管制表單系統')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
@@ -45,6 +53,11 @@ function checkAndSetHeaders(sheet) {
 // 2. 接收前端資料並寫入 Sheet
 function submitData(formData) {
   try {
+    const permission = checkAppPermission_();
+    if (!permission.allowed) {
+      return { success: false, message: permission.message || '無權限執行此操作。' };
+    }
+
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到指定的工作表，請確認名稱是否為 '" + SHEET_NAME + "'。");
 
@@ -137,6 +150,11 @@ function submitData(formData) {
 // 3. 讀取儀表板資料（由 Sheet 還原成前端 appData 結構）
 function getDashboardData() {
   try {
+    const permission = checkAppPermission_();
+    if (!permission.allowed) {
+      return { success: false, message: permission.message || '無權限讀取資料。', data: [] };
+    }
+
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到指定的工作表，請確認名稱是否為 '" + SHEET_NAME + "'。");
 
@@ -267,6 +285,11 @@ function parseRetentionCount(rawValue) {
 // 4. 讀取資訊資產（僅 B 欄為 HW），回傳「A欄 + C欄」供前端下拉搜尋
 function getAssetOptions() {
   try {
+    const permission = checkAppPermission_();
+    if (!permission.allowed) {
+      return { success: false, message: permission.message || '無權限讀取資訊資產。', data: [] };
+    }
+
     if (typeof ASSETS_SPREADSHEET_ID === 'undefined' || !String(ASSETS_SPREADSHEET_ID).trim() || ASSETS_SPREADSHEET_ID === 'PLEASE_SET_ASSETS_SPREADSHEET_ID') {
       return { success: false, message: "尚未設定外部資訊資產 Google Sheet ID（ASSETS_SPREADSHEET_ID）。", data: [] };
     }
@@ -307,4 +330,50 @@ function getAssetOptions() {
   } catch (error) {
     return { success: false, message: error.toString(), data: [] };
   }
+}
+
+function checkAppPermission_() {
+  try {
+    const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+    if (!email) {
+      return { allowed: false, message: '無法辨識目前使用者帳號，請使用可識別的 Google 帳號登入後再試。' };
+    }
+
+    if (typeof ASSETS_SPREADSHEET_ID === 'undefined' || !String(ASSETS_SPREADSHEET_ID).trim() || ASSETS_SPREADSHEET_ID === 'PLEASE_SET_ASSETS_SPREADSHEET_ID') {
+      return { allowed: false, message: '尚未設定外部權限來源試算表 ID。' };
+    }
+
+    const assetsSpreadsheet = SpreadsheetApp.openById(String(ASSETS_SPREADSHEET_ID).trim());
+    const permissionSheet = assetsSpreadsheet.getSheetByName(SHEET_PERMISSIONS_NAME);
+    if (!permissionSheet) {
+      return { allowed: false, message: '外部試算表中找不到「權限」工作表。' };
+    }
+
+    const lastRow = permissionSheet.getLastRow();
+    if (lastRow <= 1) {
+      return { allowed: false, message: '「權限」工作表尚未設定任何可用帳號。' };
+    }
+
+    const values = permissionSheet.getRange(2, 2, lastRow - 1, 1).getValues(); // B 欄
+    const allowed = values.some(function(row) {
+      return String(row[0] || '').trim().toLowerCase() === email;
+    });
+
+    if (!allowed) {
+      return { allowed: false, message: '您的帳號不在白名單中。' };
+    }
+
+    return { allowed: true, email: email };
+  } catch (error) {
+    return { allowed: false, message: '權限檢查失敗：' + error.toString() };
+  }
+}
+
+function sanitizeHtml_(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
