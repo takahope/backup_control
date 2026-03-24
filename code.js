@@ -3,11 +3,12 @@ const SHEET_NAME = '工作表1'; // 請確認您的 Google Sheet 分頁名稱是
 const SHEET_ASSETS_NAME = '資訊資產';
 const SHEET_PERMISSIONS_NAME = '權限';
 
-// 定義正確的表頭陣列 (新增 '本地_存放地點')
+// 定義正確的表頭陣列（含技術欄位）
 const EXPECTED_HEADERS = [
   '時間戳記', '系統名稱', '系統等級', '備份標的',
   '本地_差異週期', '本地_完整週期', '本地_保留代數', '本地_存放地點',
-  '是否異地', '異地_週期', '異地_地點', '異地_保留代數', '管理人員'
+  '是否異地', '異地_週期', '異地_地點', '異地_保留代數', '管理人員',
+  'submission_id', 'target_key'
 ];
 
 // 1. 輸出前端 HTML 網頁
@@ -64,81 +65,104 @@ function submitData(formData) {
     // 執行表頭檢測與自動填寫功能
     checkAndSetHeaders(sheet);
 
-    // 取得表單共用的基本資訊
-    const timestamp = new Date();
-    const systemName = formData.systemName;
-    const systemLevel = formData.systemLevel;
-    const managerName = formData.managerName;
-    
-    // 準備一個二維陣列存放要寫入的所有資料列
-    const rowsToWrite = [];
-    
     // 檢查是否有傳入標的陣列
     if (!formData.targets || formData.targets.length === 0) {
       throw new Error("沒有收到任何備份標的資料！");
     }
 
-    // 將前端傳來的所有被勾選的備份標的，逐一轉換成試算表的「列 (Row)」
+    const timestamp = new Date();
+    const systemName = String(formData.systemName || '').trim();
+    const systemLevel = String(formData.systemLevel || '').trim();
+    const managerName = String(formData.managerName || '').trim();
+    const requestedId = String(formData.id || '').trim();
+    const submissionId = requestedId || Utilities.getUuid();
+
+    const payloadRowsByTargetKey = {};
     formData.targets.forEach(function(target) {
-      
-      let diffDisplay, fullDisplay, retentionDisplay;
-
-      // 針對「系統日誌檔」的特殊處理：直接顯示保存期間，無備份週期
-      if (target.targetName === '系統日誌檔') {
-        diffDisplay = '無';
-        fullDisplay = '無';
-        retentionDisplay = target.logRetention; // 例如："保存 6 個月"
-      } else {
-        // 一般備份標的處理
-        diffDisplay = (target.localDiffValue && target.localDiffValue !== '0' && target.localDiffValue !== 'N/A') 
-                            ? target.localDiffValue + ' ' + target.localDiffUnit 
-                            : '無';
-        fullDisplay = target.localFullValue + ' ' + target.localFullUnit;
-        retentionDisplay = target.localRetention === 'ALL' ? '全部保留' : (target.localRetention + ' 代');
+      const targetName = String(target.targetName || '').trim();
+      const targetKey = normalizeTargetKey_(target.targetKey) || targetNameToKey_(targetName);
+      if (!targetKey) {
+        throw new Error('備份標的缺少可識別 target_key。');
       }
-
-      // 組合單列資料 (需對應您的試算表表頭順序)
-      const rowData = [
-        timestamp,                                           // A欄: 時間戳記
-        systemName,                                          // B欄: 系統名稱
-        systemLevel,                                         // C欄: 系統等級
-        target.targetName,                                   // D欄: 備份標的
-        diffDisplay,                                         // E欄: 本地_差異週期
-        fullDisplay,                                         // F欄: 本地_完整週期
-        retentionDisplay,                                    // G欄: 本地_保留代數 (或日誌保存期間)
-        target.localLocation,                                // H欄: 本地_存放地點 (新增)
-        target.isOffsite,                                    // I欄: 是否異地
-        target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : 'N/A', // J欄: 異地_週期
-        target.isOffsite === '是' ? target.offsiteLocation : 'N/A',                                   // K欄: 異地_地點
-        target.isOffsite === '是' ? target.offsiteRetention + ' 代' : 'N/A',                          // L欄: 異地_保留代數
-        managerName                                          // M欄: 管理人員
-      ];
-      
-      rowsToWrite.push(rowData); // 將這列加入準備寫入的陣列中
+      payloadRowsByTargetKey[targetKey] = buildSheetRowData_({
+        timestamp: timestamp,
+        systemName: systemName,
+        systemLevel: systemLevel,
+        managerName: managerName,
+        submissionId: submissionId,
+        targetKey: targetKey,
+        target: target
+      });
     });
 
-    // 將資料批次寫入 Google Sheets
-    if (rowsToWrite.length > 0) {
-      // 取得目前最後一列。若試算表原本為空，寫完表頭後 getLastRow() 會是 1
-      let startRow = sheet.getLastRow() + 1; 
-      
-      // 強制最少從第 2 列開始寫，保護第 1 列的表頭不被覆寫
-      if (startRow < 2) {
-        startRow = 2; 
+    const payloadTargetKeys = Object.keys(payloadRowsByTargetKey);
+    const existingRowsByTargetKey = {};
+    const rowsToDelete = [];
+    let updatedCount = 0;
+    let insertedCount = 0;
+    let deletedCount = 0;
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      const values = sheet.getRange(2, 1, lastRow - 1, EXPECTED_HEADERS.length).getValues();
+      values.forEach(function(row, idx) {
+        const rowNumber = idx + 2;
+        if (!isRowBelongsToSubmission_(row, submissionId)) return;
+
+        const targetKey = normalizeTargetKey_(row[14]) || targetNameToKey_(row[3]);
+        if (!targetKey) return;
+        if (!existingRowsByTargetKey[targetKey]) {
+          existingRowsByTargetKey[targetKey] = [];
+        }
+        existingRowsByTargetKey[targetKey].push(rowNumber);
+      });
+    }
+
+    // 更新既有列或標記為待新增
+    const rowsToAppend = [];
+    payloadTargetKeys.forEach(function(targetKey) {
+      const existingRows = existingRowsByTargetKey[targetKey] || [];
+      const rowData = payloadRowsByTargetKey[targetKey];
+
+      if (existingRows.length > 0) {
+        const keepRow = existingRows.shift();
+        sheet.getRange(keepRow, 1, 1, rowData.length).setValues([rowData]);
+        updatedCount++;
+        // 同一 submission/target 若有重複列，保留第一筆其餘刪除
+        existingRows.forEach(function(rowNum) { rowsToDelete.push(rowNum); });
+      } else {
+        rowsToAppend.push(rowData);
       }
 
-      const startCol = 1;                      // 從第 A 欄開始寫
-      const numRows = rowsToWrite.length;      // 要寫入幾列
-      const numCols = rowsToWrite[0].length;   // 每列有幾欄
+      delete existingRowsByTargetKey[targetKey];
+    });
 
-      // 一次性寫入多行資料
-      sheet.getRange(startRow, startCol, numRows, numCols).setValues(rowsToWrite);
+    // 編輯時取消勾選的標的：刪除舊列
+    Object.keys(existingRowsByTargetKey).forEach(function(targetKey) {
+      const staleRows = existingRowsByTargetKey[targetKey] || [];
+      staleRows.forEach(function(rowNum) { rowsToDelete.push(rowNum); });
+    });
+
+    if (rowsToDelete.length > 0) {
+      const uniqueRows = Array.from(new Set(rowsToDelete)).sort(function(a, b) { return b - a; });
+      uniqueRows.forEach(function(rowNum) {
+        sheet.deleteRow(rowNum);
+        deletedCount++;
+      });
+    }
+
+    if (rowsToAppend.length > 0) {
+      let startRow = sheet.getLastRow() + 1;
+      if (startRow < 2) startRow = 2;
+      sheet.getRange(startRow, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
+      insertedCount += rowsToAppend.length;
     }
 
     // 回傳成功訊息與處理筆數給前端
     return { 
       success: true, 
-      message: `成功寫入 ${rowsToWrite.length} 筆標的紀錄！` 
+      submissionId: submissionId,
+      message: `同步完成：更新 ${updatedCount} 筆、新增 ${insertedCount} 筆、移除 ${deletedCount} 筆。`
     };
     
   } catch (error) {
@@ -175,11 +199,14 @@ function getDashboardData() {
       const systemLevel = String(row[2] || '').trim();
       const targetName = String(row[3] || '').trim();
       const managerName = String(row[12] || '').trim();
+      const submissionId = String(row[13] || '').trim();
+      const targetKey = normalizeTargetKey_(row[14]) || targetNameToKey_(targetName);
 
       if (!systemName || !targetName) return;
 
       const ts = timestamp.getTime() || 0;
-      const submissionKey = [systemName, systemLevel, managerName, ts].join('||');
+      const legacyKey = buildLegacySubmissionKey_(timestamp, systemName, systemLevel, managerName);
+      const submissionKey = submissionId || legacyKey;
 
       if (!bySubmission.has(submissionKey)) {
         bySubmission.set(submissionKey, {
@@ -192,7 +219,7 @@ function getDashboardData() {
         });
       }
 
-      bySubmission.get(submissionKey).targets.push(parseTargetFromRow(row));
+      bySubmission.get(submissionKey).targets.push(parseTargetFromRow(row, targetKey));
     });
 
     const latestBySystem = new Map();
@@ -222,7 +249,7 @@ function getDashboardData() {
   }
 }
 
-function parseTargetFromRow(row) {
+function parseTargetFromRow(row, targetKeyFromRow) {
   const targetName = String(row[3] || '').trim();
   const localDiff = splitCycleValue(row[4], '天');
   const localFull = splitCycleValue(row[5], '週');
@@ -233,6 +260,7 @@ function parseTargetFromRow(row) {
   const offsiteRetention = parseRetentionCount(row[11]);
 
   const target = {
+    targetKey: normalizeTargetKey_(targetKeyFromRow) || targetNameToKey_(targetName),
     targetName: targetName,
     localDiffValue: localDiff.value,
     localDiffUnit: localDiff.unit,
@@ -259,6 +287,87 @@ function parseTargetFromRow(row) {
   }
 
   return target;
+}
+
+function buildSheetRowData_(options) {
+  const target = options.target || {};
+  const targetName = String(target.targetName || '').trim();
+  const targetKey = normalizeTargetKey_(options.targetKey) || targetNameToKey_(targetName);
+
+  let diffDisplay;
+  let fullDisplay;
+  let retentionDisplay;
+  if (targetName === '系統日誌檔' || targetKey === 'log') {
+    diffDisplay = '無';
+    fullDisplay = '無';
+    retentionDisplay = String(target.logRetention || '').trim();
+  } else {
+    diffDisplay = (target.localDiffValue && target.localDiffValue !== '0' && target.localDiffValue !== 'N/A')
+      ? (target.localDiffValue + ' ' + target.localDiffUnit)
+      : '無';
+    fullDisplay = target.localFullValue + ' ' + target.localFullUnit;
+    retentionDisplay = target.localRetention === 'ALL' ? '全部保留' : (target.localRetention + ' 代');
+  }
+
+  return [
+    options.timestamp,                                                           // A欄: 時間戳記
+    options.systemName,                                                          // B欄: 系統名稱
+    options.systemLevel,                                                         // C欄: 系統等級
+    targetName,                                                                  // D欄: 備份標的
+    diffDisplay,                                                                 // E欄: 本地_差異週期
+    fullDisplay,                                                                 // F欄: 本地_完整週期
+    retentionDisplay,                                                            // G欄: 本地_保留代數
+    target.localLocation,                                                        // H欄: 本地_存放地點
+    target.isOffsite,                                                            // I欄: 是否異地
+    target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : 'N/A', // J欄: 異地_週期
+    target.isOffsite === '是' ? target.offsiteLocation : 'N/A',                 // K欄: 異地_地點
+    target.isOffsite === '是' ? target.offsiteRetention + ' 代' : 'N/A',        // L欄: 異地_保留代數
+    options.managerName,                                                         // M欄: 管理人員
+    options.submissionId,                                                        // N欄: submission_id
+    targetKey                                                                    // O欄: target_key
+  ];
+}
+
+function normalizeTargetKey_(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (key === 'config' || key === 'source' || key === 'db' || key === 'log' || key === 'image' || key === 'other') {
+    return key;
+  }
+  return '';
+}
+
+function targetNameToKey_(name) {
+  const text = String(name || '').trim();
+  if (text === '設定檔') return 'config';
+  if (text === '原始碼') return 'source';
+  if (text === '資料庫') return 'db';
+  if (text === '系統日誌檔') return 'log';
+  if (text === '整體影像備份') return 'image';
+  if (text === '其他') return 'other';
+  return '';
+}
+
+function buildLegacySubmissionKey_(timestamp, systemName, systemLevel, managerName) {
+  const ts = timestamp && timestamp.getTime ? (timestamp.getTime() || 0) : 0;
+  return [String(systemName || '').trim(), String(systemLevel || '').trim(), String(managerName || '').trim(), ts].join('||');
+}
+
+function isRowBelongsToSubmission_(row, submissionId) {
+  const id = String(submissionId || '').trim();
+  if (!id) return false;
+
+  const rowSubmissionId = String(row[13] || '').trim();
+  if (rowSubmissionId && rowSubmissionId === id) {
+    return true;
+  }
+
+  if (!rowSubmissionId) {
+    const timestamp = row[0] ? new Date(row[0]) : new Date(0);
+    const legacyId = buildLegacySubmissionKey_(timestamp, row[1], row[2], row[12]);
+    return legacyId === id;
+  }
+
+  return false;
 }
 
 function splitCycleValue(rawValue, fallbackUnit) {

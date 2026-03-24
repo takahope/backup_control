@@ -621,7 +621,7 @@
 
       // 填入標的資料
       sys.targets.forEach(tData => {
-        const targetDef = backupTargets.find(b => b.name === tData.targetName);
+        const targetDef = backupTargets.find(b => b.id === tData.targetKey) || backupTargets.find(b => b.name === tData.targetName);
         if(targetDef) {
           const tid = targetDef.id;
           // 勾選並展開卡片
@@ -934,6 +934,7 @@
         }
 
         return {
+          targetKey: t.id,
           targetName: t.name,
           localDiffValue: t.id !== 'log' ? (document.getElementById(`diffValue_${t.id}`).value || '0') : 'N/A',
           localDiffUnit: t.id !== 'log' ? document.getElementById(`diffUnit_${t.id}`).value : '',
@@ -953,7 +954,7 @@
       });
 
       const formData = {
-        id: systemId || Date.now().toString(), // 如果有 ID 就更新，否則產生新 ID
+        id: systemId || '', // 新增時由後端產生 submission_id
         systemName: document.getElementById('systemName').value,
         systemLevel: document.getElementById('systemLevel').value,
         managerName: document.getElementById('managerName').value,
@@ -961,13 +962,15 @@
       };
 
       // --- 本地模擬更新邏輯 ---
+      const localId = systemId || ('local_' + Date.now().toString());
+      const localRecord = Object.assign({}, formData, { id: localId });
       if (systemId) {
         // 更新模式
         const index = appData.findIndex(s => s.id === systemId);
-        if(index !== -1) appData[index] = formData;
+        if(index !== -1) appData[index] = localRecord;
       } else {
         // 新增模式
-        appData.push(formData);
+        appData.push(localRecord);
       }
       
       // 儲存至本地端，確保重新整理後資料還在
@@ -977,10 +980,24 @@
       if (typeof google !== 'undefined' && google.script) {
         google.script.run
           .withSuccessHandler(function(response) {
+            if (!response || response.success !== true) {
+              handleError((response && response.message) ? response.message : '後端儲存失敗。');
+              return;
+            }
+            if (!systemId && response && response.submissionId) {
+              const idx = appData.findIndex(s => s.id === localId);
+              if (idx !== -1) {
+                appData[idx].id = response.submissionId;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+              }
+            }
             handleSuccess(response.message || '資料已成功寫入後端與本地！');
           })
           .withFailureHandler(function(error) {
-            handleError('連線失敗，但資料已暫存於本地。');
+            const errMsg = (error && error.message)
+              ? ('後端呼叫失敗：' + error.message)
+              : '連線失敗，但資料已暫存於本地。';
+            handleError(errMsg);
           })
           .submitData(formData);
       } else {
