@@ -293,20 +293,28 @@ function buildSheetRowData_(options) {
   const target = options.target || {};
   const targetName = String(target.targetName || '').trim();
   const targetKey = normalizeTargetKey_(options.targetKey) || targetNameToKey_(targetName);
+  const isLogTarget = (targetName === '系統日誌檔' || targetKey === 'log');
 
   let diffDisplay;
   let fullDisplay;
   let retentionDisplay;
-  if (targetName === '系統日誌檔' || targetKey === 'log') {
-    diffDisplay = '無';
-    fullDisplay = '無';
-    retentionDisplay = String(target.logRetention || '').trim();
+  let offsiteCycleDisplay;
+  let offsiteRetentionDisplay;
+
+  if (isLogTarget) {
+    diffDisplay = '不適用';
+    fullDisplay = '不適用';
+    retentionDisplay = '不適用';
+    offsiteCycleDisplay = '不適用';
+    offsiteRetentionDisplay = '不適用';
   } else {
     diffDisplay = (target.localDiffValue && target.localDiffValue !== '0' && target.localDiffValue !== 'N/A')
       ? (target.localDiffValue + ' ' + target.localDiffUnit)
       : '無';
     fullDisplay = target.localFullValue + ' ' + target.localFullUnit;
     retentionDisplay = target.localRetention === 'ALL' ? '全部保留' : (target.localRetention + ' 代');
+    offsiteCycleDisplay = target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : '無';
+    offsiteRetentionDisplay = target.isOffsite === '是' ? (target.offsiteRetention + ' 代') : '無';
   }
 
   return [
@@ -319,9 +327,9 @@ function buildSheetRowData_(options) {
     retentionDisplay,                                                            // G欄: 本地_保留代數
     target.localLocation,                                                        // H欄: 本地_存放地點
     target.isOffsite,                                                            // I欄: 是否異地
-    target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : '無', // J欄: 異地_週期
+    offsiteCycleDisplay,                                                         // J欄: 異地_週期
     target.isOffsite === '是' ? target.offsiteLocation : '無',                 // K欄: 異地_地點
-    target.isOffsite === '是' ? target.offsiteRetention + ' 代' : '無',        // L欄: 異地_保留代數
+    offsiteRetentionDisplay,                                                     // L欄: 異地_保留代數
     options.managerName,                                                         // M欄: 管理人員
     options.submissionId,                                                        // N欄: submission_id
     targetKey                                                                    // O欄: target_key
