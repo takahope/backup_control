@@ -319,9 +319,9 @@ function buildSheetRowData_(options) {
     retentionDisplay,                                                            // G欄: 本地_保留代數
     target.localLocation,                                                        // H欄: 本地_存放地點
     target.isOffsite,                                                            // I欄: 是否異地
-    target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : 'N/A', // J欄: 異地_週期
-    target.isOffsite === '是' ? target.offsiteLocation : 'N/A',                 // K欄: 異地_地點
-    target.isOffsite === '是' ? target.offsiteRetention + ' 代' : 'N/A',        // L欄: 異地_保留代數
+    target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : '無', // J欄: 異地_週期
+    target.isOffsite === '是' ? target.offsiteLocation : '無',                 // K欄: 異地_地點
+    target.isOffsite === '是' ? target.offsiteRetention + ' 代' : '無',        // L欄: 異地_保留代數
     options.managerName,                                                         // M欄: 管理人員
     options.submissionId,                                                        // N欄: submission_id
     targetKey                                                                    // O欄: target_key
