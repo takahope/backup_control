@@ -233,15 +233,15 @@
       const isLogTarget = String(target.targetName || '').trim() === '系統日誌檔';
       const offsiteEnabled = String(target.isOffsite || '').trim() === '是';
 
-      const localDiff = isLogTarget ? '無' : formatCycle(target.localDiffValue, target.localDiffUnit);
-      const localFull = isLogTarget ? '無' : formatCycle(target.localFullValue, target.localFullUnit);
+      const localDiff = isLogTarget ? '不適用' : formatCycle(target.localDiffValue, target.localDiffUnit);
+      const localFull = isLogTarget ? '不適用' : formatCycle(target.localFullValue, target.localFullUnit);
       const localRetention = isLogTarget
         ? safeText(target.logRetention, '無')
         : formatRetention(target.localRetention);
       const localLocation = safeText(target.localLocation, '未填寫');
-      const offsiteCycle = offsiteEnabled ? formatCycle(target.offsiteFreqValue, target.offsiteFreqUnit) : '無';
+      const offsiteCycle = isLogTarget ? '不適用' : (offsiteEnabled ? formatCycle(target.offsiteFreqValue, target.offsiteFreqUnit) : '無');
       const offsiteLocation = offsiteEnabled ? safeText(target.offsiteLocation, '未填寫') : '無';
-      const offsiteRetention = offsiteEnabled ? formatRetention(target.offsiteRetention) : '無';
+      const offsiteRetention = isLogTarget ? '不適用' : (offsiteEnabled ? formatRetention(target.offsiteRetention) : '無');
 
       return `
         <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2">
@@ -936,13 +936,13 @@
         return {
           targetKey: t.id,
           targetName: t.name,
-          localDiffValue: t.id !== 'log' ? (document.getElementById(`diffValue_${t.id}`).value || '0') : 'N/A',
+          localDiffValue: t.id !== 'log' ? (document.getElementById(`diffValue_${t.id}`).value || '0') : '不適用',
           localDiffUnit: t.id !== 'log' ? document.getElementById(`diffUnit_${t.id}`).value : '',
-          localFullValue: t.id !== 'log' ? document.getElementById(`fullValue_${t.id}`).value : 'N/A',
+          localFullValue: t.id !== 'log' ? document.getElementById(`fullValue_${t.id}`).value : '不適用',
           localFullUnit: t.id !== 'log' ? document.getElementById(`fullUnit_${t.id}`).value : '',
           localRetention: t.id !== 'log'
             ? (document.getElementById(`localRetAll_${t.id}`).checked ? 'ALL' : document.getElementById(`localRet_${t.id}`).value)
-            : 'N/A',
+            : logRetention,
           localLocation: t.id !== 'log' ? document.getElementById(`localLoc_${t.id}`).value : document.getElementById(`logLocalLoc_${t.id}`).value,
           logRetention: logRetention,
           isOffsite: isOffsite,
