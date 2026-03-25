@@ -304,7 +304,7 @@ function buildSheetRowData_(options) {
   if (isLogTarget) {
     diffDisplay = '不適用';
     fullDisplay = '不適用';
-    retentionDisplay = '不適用';
+    retentionDisplay = String(target.logRetention || '').trim();
     offsiteCycleDisplay = '不適用';
     offsiteRetentionDisplay = '不適用';
   } else {
