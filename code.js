@@ -427,16 +427,16 @@ function getAssetOptions() {
         if (systemSheet) {
           const lastRow = systemSheet.getLastRow();
           if (lastRow > 1) {
-            const values = systemSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+            const values = systemSheet.getRange(2, 1, lastRow - 1, 17).getValues();
             const seen = {};
             values.forEach(function(row) {
               const colA = String(row[0] || '').trim();
               const colC = String(row[2] || '').trim();
-              const colG = String(row[6] || '').trim(); // 系統等級
+              const colQ = String(row[16] || '').trim(); // 系統等級
               if (!colA && !colC) return;
               
               const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
-              const level = (colG === '中級' || colG === '高級') ? '關鍵核心系統' : '一般系統';
+              const level = (colQ === '中級' || colQ === '高級') ? '關鍵核心系統' : '一般系統';
               
               if (!seen[name]) { 
                 seen[name] = true; 
