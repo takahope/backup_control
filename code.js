@@ -409,50 +409,72 @@ function parseRetentionCount(rawValue) {
   return match ? match[1] : '';
 }
 
-// 4. 讀取防護基準系統清冊，回傳「A欄(系統ID) + C欄(系統名稱)」供前端下拉搜尋
+// 4. 讀取防護基準系統清冊與外部資訊資產清單，供前端動態切換來源
 function getAssetOptions() {
   try {
     const permission = checkAppPermission_();
     if (!permission.allowed) {
-      return { success: false, message: permission.message || '無權限讀取系統清冊。', data: [] };
+      return { success: false, message: permission.message || '無權限讀取來源清冊。', data: { systems: [], assets: [] } };
     }
 
-    if (typeof SECURITY_BASELINE_SPREADSHEET_ID === 'undefined' || !String(SECURITY_BASELINE_SPREADSHEET_ID).trim() || SECURITY_BASELINE_SPREADSHEET_ID === 'PLEASE_SET_SECURITY_BASELINE_SPREADSHEET_ID') {
-      return { success: false, message: "尚未設定防護基準 Google Sheet ID（SECURITY_BASELINE_SPREADSHEET_ID）。", data: [] };
-    }
+    const result = { systems: [], assets: [] };
 
-    const baselineSpreadsheet = SpreadsheetApp.openById(String(SECURITY_BASELINE_SPREADSHEET_ID).trim());
-    const sheet = baselineSpreadsheet.getSheetByName('系統清冊');
-    if (!sheet) {
-      return { success: false, message: "在防護基準試算表中找不到「系統清冊」工作表。", data: [] };
-    }
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-      return { success: true, data: [] };
-    }
-
-    const values = sheet.getRange(2, 1, lastRow - 1, 3).getValues(); // A(系統ID), B, C(系統名稱)
-    const options = [];
-    const seen = {};
-
-    values.forEach(function(row) {
-      const colA = String(row[0] || '').trim(); // 系統ID
-      const colC = String(row[2] || '').trim(); // 系統名稱
-
-      if (!colA && !colC) return;
-
-      const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
-      if (!seen[name]) {
-        seen[name] = true;
-        options.push(name);
+    // 1. 讀取防護基準系統清冊
+    if (typeof SECURITY_BASELINE_SPREADSHEET_ID !== 'undefined' && SECURITY_BASELINE_SPREADSHEET_ID !== 'PLEASE_SET_SECURITY_BASELINE_SPREADSHEET_ID') {
+      try {
+        const baselineSpreadsheet = SpreadsheetApp.openById(String(SECURITY_BASELINE_SPREADSHEET_ID).trim());
+        const systemSheet = baselineSpreadsheet.getSheetByName('系統清冊');
+        if (systemSheet) {
+          const lastRow = systemSheet.getLastRow();
+          if (lastRow > 1) {
+            const values = systemSheet.getRange(2, 1, lastRow - 1, 3).getValues();
+            const seen = {};
+            values.forEach(function(row) {
+              const colA = String(row[0] || '').trim();
+              const colC = String(row[2] || '').trim();
+              if (!colA && !colC) return;
+              const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
+              if (!seen[name]) { seen[name] = true; result.systems.push(name); }
+            });
+            result.systems.sort();
+          }
+        }
+      } catch (e) {
+        console.warn('讀取系統清冊失敗', e);
       }
-    });
+    }
 
-    options.sort();
-    return { success: true, data: options };
+    // 2. 讀取資訊資產清單
+    if (typeof ASSETS_SPREADSHEET_ID !== 'undefined' && ASSETS_SPREADSHEET_ID !== 'PLEASE_SET_ASSETS_SPREADSHEET_ID') {
+      try {
+        const assetsSpreadsheet = SpreadsheetApp.openById(String(ASSETS_SPREADSHEET_ID).trim());
+        // 嘗試抓取「資訊資產清單」，若無則退回抓取「資訊資產」
+        let assetsSheet = assetsSpreadsheet.getSheetByName('資訊資產清單');
+        if (!assetsSheet) assetsSheet = assetsSpreadsheet.getSheetByName('資訊資產');
+        
+        if (assetsSheet) {
+          const lastRow = assetsSheet.getLastRow();
+          if (lastRow > 1) {
+            const values = assetsSheet.getRange(2, 1, lastRow - 1, 3).getValues();
+            const seen = {};
+            values.forEach(function(row) {
+              const colA = String(row[0] || '').trim();
+              const colC = String(row[2] || '').trim();
+              if (!colA && !colC) return;
+              const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
+              if (!seen[name]) { seen[name] = true; result.assets.push(name); }
+            });
+            result.assets.sort();
+          }
+        }
+      } catch (e) {
+        console.warn('讀取資訊資產失敗', e);
+      }
+    }
+
+    return { success: true, data: result };
   } catch (error) {
-    return { success: false, message: error.toString(), data: [] };
+    return { success: false, message: error.toString(), data: { systems: [], assets: [] } };
   }
 }
 
