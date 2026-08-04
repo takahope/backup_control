@@ -427,16 +427,23 @@ function getAssetOptions() {
         if (systemSheet) {
           const lastRow = systemSheet.getLastRow();
           if (lastRow > 1) {
-            const values = systemSheet.getRange(2, 1, lastRow - 1, 3).getValues();
+            const values = systemSheet.getRange(2, 1, lastRow - 1, 7).getValues();
             const seen = {};
             values.forEach(function(row) {
               const colA = String(row[0] || '').trim();
               const colC = String(row[2] || '').trim();
+              const colG = String(row[6] || '').trim(); // 系統等級
               if (!colA && !colC) return;
+              
               const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
-              if (!seen[name]) { seen[name] = true; result.systems.push(name); }
+              const level = (colG === '中級' || colG === '高級') ? '關鍵核心系統' : '一般系統';
+              
+              if (!seen[name]) { 
+                seen[name] = true; 
+                result.systems.push({ name: name, level: level }); 
+              }
             });
-            result.systems.sort();
+            result.systems.sort((a, b) => a.name.localeCompare(b.name));
           }
         }
       } catch (e) {
@@ -455,16 +462,28 @@ function getAssetOptions() {
         if (assetsSheet) {
           const lastRow = assetsSheet.getLastRow();
           if (lastRow > 1) {
-            const values = assetsSheet.getRange(2, 1, lastRow - 1, 3).getValues();
+            const values = assetsSheet.getRange(2, 1, lastRow - 1, 18).getValues();
             const seen = {};
             values.forEach(function(row) {
               const colA = String(row[0] || '').trim();
               const colC = String(row[2] || '').trim();
+              const colR = row[17]; // 資產價值
               if (!colA && !colC) return;
+              
               const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
-              if (!seen[name]) { seen[name] = true; result.assets.push(name); }
+              
+              let level = '一般系統';
+              const rValue = parseFloat(colR);
+              if (!isNaN(rValue) && rValue >= 7) {
+                level = '關鍵核心系統';
+              }
+
+              if (!seen[name]) { 
+                seen[name] = true; 
+                result.assets.push({ name: name, level: level }); 
+              }
             });
-            result.assets.sort();
+            result.assets.sort((a, b) => a.name.localeCompare(b.name));
           }
         }
       } catch (e) {
