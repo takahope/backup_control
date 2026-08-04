@@ -409,22 +409,22 @@ function parseRetentionCount(rawValue) {
   return match ? match[1] : '';
 }
 
-// 4. 讀取資訊資產（僅 B 欄為 HW），回傳「A欄 + C欄」供前端下拉搜尋
+// 4. 讀取防護基準系統清冊，回傳「A欄(系統ID) + C欄(系統名稱)」供前端下拉搜尋
 function getAssetOptions() {
   try {
     const permission = checkAppPermission_();
     if (!permission.allowed) {
-      return { success: false, message: permission.message || '無權限讀取資訊資產。', data: [] };
+      return { success: false, message: permission.message || '無權限讀取系統清冊。', data: [] };
     }
 
-    if (typeof ASSETS_SPREADSHEET_ID === 'undefined' || !String(ASSETS_SPREADSHEET_ID).trim() || ASSETS_SPREADSHEET_ID === 'PLEASE_SET_ASSETS_SPREADSHEET_ID') {
-      return { success: false, message: "尚未設定外部資訊資產 Google Sheet ID（ASSETS_SPREADSHEET_ID）。", data: [] };
+    if (typeof SECURITY_BASELINE_SPREADSHEET_ID === 'undefined' || !String(SECURITY_BASELINE_SPREADSHEET_ID).trim() || SECURITY_BASELINE_SPREADSHEET_ID === 'PLEASE_SET_SECURITY_BASELINE_SPREADSHEET_ID') {
+      return { success: false, message: "尚未設定防護基準 Google Sheet ID（SECURITY_BASELINE_SPREADSHEET_ID）。", data: [] };
     }
 
-    const assetsSpreadsheet = SpreadsheetApp.openById(String(ASSETS_SPREADSHEET_ID).trim());
-    const sheet = assetsSpreadsheet.getSheetByName(SHEET_ASSETS_NAME);
+    const baselineSpreadsheet = SpreadsheetApp.openById(String(SECURITY_BASELINE_SPREADSHEET_ID).trim());
+    const sheet = baselineSpreadsheet.getSheetByName('系統清冊');
     if (!sheet) {
-      return { success: false, message: "在外部試算表中找不到「資訊資產」工作表。", data: [] };
+      return { success: false, message: "在防護基準試算表中找不到「系統清冊」工作表。", data: [] };
     }
 
     const lastRow = sheet.getLastRow();
@@ -432,21 +432,14 @@ function getAssetOptions() {
       return { success: true, data: [] };
     }
 
-    const values = sheet.getRange(2, 1, lastRow - 1, 3).getValues(); // A,B,C
+    const values = sheet.getRange(2, 1, lastRow - 1, 3).getValues(); // A(系統ID), B, C(系統名稱)
     const options = [];
     const seen = {};
 
     values.forEach(function(row) {
-      const colA = String(row[0] || '').trim();
-      const colB = String(row[1] || '').trim();
-      const colC = String(row[2] || '').trim();
-      const normalizedType = colB
-        .replace(/Ｓ/g, 'S')
-        .replace(/Ｈ/g, 'H')
-        .replace(/Ｗ/g, 'W')
-        .toUpperCase();
+      const colA = String(row[0] || '').trim(); // 系統ID
+      const colC = String(row[2] || '').trim(); // 系統名稱
 
-      if (normalizedType !== 'HW' && normalizedType !== 'SW') return;
       if (!colA && !colC) return;
 
       const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
