@@ -163,7 +163,8 @@
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700">系統屬性</label>
-                <select id="systemLevel" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                <select id="systemLevel" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500" onchange="renderAssetOptionsDatalist()">
+                  <option value="">請選擇 (或由系統名稱帶入)</option>
                   <option value="關鍵核心系統">關鍵核心系統</option>
                   <option value="一般系統">一般系統</option>
                 </select>
@@ -306,10 +307,13 @@
     function renderAssetOptionsDatalist() {
       const sysList = document.getElementById('systemOptionsList');
       const astList = document.getElementById('assetOptionsList');
+      const levelSelect = document.getElementById('systemLevel');
+      const filterLevel = levelSelect ? levelSelect.value : '';
       
       if (sysList) {
         sysList.innerHTML = '';
-        systemOptionsData.forEach(item => {
+        const filteredSys = filterLevel ? systemOptionsData.filter(item => item.level === filterLevel) : systemOptionsData;
+        filteredSys.forEach(item => {
           const option = document.createElement('option');
           option.value = item.name;
           sysList.appendChild(option);
@@ -318,7 +322,8 @@
       
       if (astList) {
         astList.innerHTML = '';
-        assetOptionsData.forEach(item => {
+        const filteredAst = filterLevel ? assetOptionsData.filter(item => item.level === filterLevel) : assetOptionsData;
+        filteredAst.forEach(item => {
           const option = document.createElement('option');
           option.value = item.name;
           astList.appendChild(option);
@@ -409,8 +414,9 @@
       const matched = targetData.find(item => item.name === inputVal);
       if (matched && matched.level) {
         const levelSelect = document.getElementById('systemLevel');
-        if (levelSelect) {
+        if (levelSelect && levelSelect.value !== matched.level) {
           levelSelect.value = matched.level;
+          renderAssetOptionsDatalist(); // 同步更新 datalist
         }
       }
     }
