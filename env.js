@@ -3,6 +3,9 @@
 // 例如：https://docs.google.com/spreadsheets/d/<THIS_IS_THE_ID>/edit
 const ASSETS_SPREADSHEET_ID = '1NZr8VGfU5qnylXRKymtgB8';
 
+// 防護基準 Google Sheet 檔案 ID（含有「系統清冊」工作表）
+const SECURITY_BASELINE_SPREADSHEET_ID = 'PLEASE_SET_SECURITY_BASELINE_SPREADSHEET_ID';
+
 // Google Doc 範本檔案 ID（含 {{年}} {{月}} {{日}} {{紀錄編號}} 佔位符）
 const FORM_TEMPLATE_DOC_ID = '1r8BRAlwn-iUIhOIatc';
 
