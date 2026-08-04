@@ -109,7 +109,7 @@ function submitData(formData) {
         const rowNumber = idx + 2;
         if (!isRowBelongsToSubmission_(row, submissionId)) return;
 
-        const targetKey = normalizeTargetKey_(row[14]) || targetNameToKey_(row[3]);
+        const targetKey = normalizeTargetKey_(row[15]) || targetNameToKey_(row[4]);
         if (!targetKey) return;
         if (!existingRowsByTargetKey[targetKey]) {
           existingRowsByTargetKey[targetKey] = [];
@@ -195,12 +195,13 @@ function getDashboardData() {
     const bySubmission = new Map();
     values.forEach(function(row) {
       const timestamp = row[0] ? new Date(row[0]) : new Date(0);
-      const systemName = String(row[1] || '').trim();
-      const systemLevel = String(row[2] || '').trim();
-      const targetName = String(row[3] || '').trim();
-      const managerName = String(row[12] || '').trim();
-      const submissionId = String(row[13] || '').trim();
-      const targetKey = normalizeTargetKey_(row[14]) || targetNameToKey_(targetName);
+      const systemId = String(row[1] || '').trim();
+      const systemName = String(row[2] || '').trim();
+      const systemLevel = String(row[3] || '').trim();
+      const targetName = String(row[4] || '').trim();
+      const managerName = String(row[13] || '').trim();
+      const submissionId = String(row[14] || '').trim();
+      const targetKey = normalizeTargetKey_(row[15]) || targetNameToKey_(targetName);
 
       if (!systemName || !targetName) return;
 
@@ -250,14 +251,14 @@ function getDashboardData() {
 }
 
 function parseTargetFromRow(row, targetKeyFromRow) {
-  const targetName = String(row[3] || '').trim();
-  const localDiff = splitCycleValue(row[4], '天');
-  const localFull = splitCycleValue(row[5], '週');
-  const localRetention = parseRetentionCount(row[6]);
-  const localLocation = String(row[7] || '').trim();
-  const isOffsite = String(row[8] || '否').trim() || '否';
-  const offsiteFreq = splitCycleValue(row[9], '週');
-  const offsiteRetention = parseRetentionCount(row[11]);
+  const targetName = String(row[4] || '').trim();
+  const localDiff = splitCycleValue(row[5], '天');
+  const localFull = splitCycleValue(row[6], '週');
+  const localRetention = parseRetentionCount(row[7]);
+  const localLocation = String(row[8] || '').trim();
+  const isOffsite = String(row[9] || '否').trim() || '否';
+  const offsiteFreq = splitCycleValue(row[10], '週');
+  const offsiteRetention = parseRetentionCount(row[12]);
 
   const target = {
     targetKey: normalizeTargetKey_(targetKeyFromRow) || targetNameToKey_(targetName),
@@ -272,7 +273,7 @@ function parseTargetFromRow(row, targetKeyFromRow) {
     isOffsite: isOffsite,
     offsiteFreqValue: offsiteFreq.value,
     offsiteFreqUnit: offsiteFreq.unit,
-    offsiteLocation: isOffsite === '是' ? String(row[10] || '').trim() : '',
+    offsiteLocation: isOffsite === '是' ? String(row[11] || '').trim() : '',
     offsiteRetention: isOffsite === '是' ? offsiteRetention : ''
   };
 
@@ -283,7 +284,7 @@ function parseTargetFromRow(row, targetKeyFromRow) {
     target.localFullValue = 'N/A';
     target.localFullUnit = '';
     target.localRetention = 'N/A';
-    target.logRetention = String(row[6] || '').trim();
+    target.logRetention = String(row[7] || '').trim();
   }
 
   return target;
@@ -509,18 +510,19 @@ function generateBackupControlDocument() {
 
     values.forEach(function(row, idx) {
       const timestamp = formatCellValue_(row[0]);
-      const systemName = formatCellValue_(row[1]);
-      const systemLevel = formatCellValue_(row[2]);
-      const backupTarget = formatCellValue_(row[3]);
-      const localDiff = formatCellValue_(row[4]);
-      const localFull = formatCellValue_(row[5]);
-      const localRetention = formatCellValue_(row[6]);
-      const localLocation = formatCellValue_(row[7]);
-      const isOffsite = formatCellValue_(row[8]);
-      const offsiteCycle = formatCellValue_(row[9]);
-      const offsiteLocation = formatCellValue_(row[10]);
-      const offsiteRetention = formatCellValue_(row[11]);
-      const manager = formatCellValue_(row[12]);
+      const systemId = formatCellValue_(row[1]);
+      const systemName = formatCellValue_(row[2]);
+      const systemLevel = formatCellValue_(row[3]);
+      const backupTarget = formatCellValue_(row[4]);
+      const localDiff = formatCellValue_(row[5]);
+      const localFull = formatCellValue_(row[6]);
+      const localRetention = formatCellValue_(row[7]);
+      const localLocation = formatCellValue_(row[8]);
+      const isOffsite = formatCellValue_(row[9]);
+      const offsiteCycle = formatCellValue_(row[10]);
+      const offsiteLocation = formatCellValue_(row[11]);
+      const offsiteRetention = formatCellValue_(row[12]);
+      const manager = formatCellValue_(row[13]);
 
       const col2 = systemName + (systemLevel ? ('（' + systemLevel + '）') : '');
       const col3 = backupTarget && backupTarget !== '無' ? '是' : '否';
