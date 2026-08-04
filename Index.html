@@ -159,7 +159,7 @@
                   </label>
                 </div>
                 <label class="block text-sm font-medium text-gray-700">系統 / 資訊資產</label>
-                <input type="text" id="systemName" list="systemOptionsList" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                <input type="text" id="systemName" list="systemOptionsList" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500" onchange="handleSystemNameInput()">
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700">系統屬性</label>
@@ -309,18 +309,18 @@
       
       if (sysList) {
         sysList.innerHTML = '';
-        systemOptionsData.forEach(name => {
+        systemOptionsData.forEach(item => {
           const option = document.createElement('option');
-          option.value = name;
+          option.value = item.name;
           sysList.appendChild(option);
         });
       }
       
       if (astList) {
         astList.innerHTML = '';
-        assetOptionsData.forEach(name => {
+        assetOptionsData.forEach(item => {
           const option = document.createElement('option');
-          option.value = name;
+          option.value = item.name;
           astList.appendChild(option);
         });
       }
@@ -397,8 +397,27 @@
       }
     }
 
+    function handleSystemNameInput() {
+      const inputVal = document.getElementById('systemName').value.trim();
+      if (!inputVal) return;
+
+      const sourceRadio = document.querySelector('input[name="sourceType"]:checked');
+      if (!sourceRadio) return;
+      
+      const targetData = sourceRadio.value === 'systems' ? systemOptionsData : assetOptionsData;
+      
+      const matched = targetData.find(item => item.name === inputVal);
+      if (matched && matched.level) {
+        const levelSelect = document.getElementById('systemLevel');
+        if (levelSelect) {
+          levelSelect.value = matched.level;
+        }
+      }
+    }
+
     function validateLocalLocationSelection(activeTargets) {
       if (!Array.isArray(assetOptionsData) || assetOptionsData.length === 0) return true;
+      const validNames = assetOptionsData.map(item => item.name);
 
       for (const t of activeTargets) {
         const inputId = t.id === 'log' ? `logLocalLoc_${t.id}` : `localLoc_${t.id}`;
@@ -407,7 +426,7 @@
 
         const value = String(input.value || '').trim();
         if (!value) continue; // required 屬性會先擋空值
-        if (!assetOptionsData.includes(value)) {
+        if (!validNames.includes(value)) {
           alert(`「${t.name}」的本地存放地點/設備請從下拉選單選擇有效的資訊資產。`);
           input.focus();
           return false;
