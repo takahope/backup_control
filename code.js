@@ -1,6 +1,6 @@
 // Code.gs - 處理網頁請求與寫入 Google Sheets
 const SHEET_NAME = '備份管制'; // 請確認您的 Google Sheet 分頁名稱是否為此
-const SHEET_ASSETS_NAME = '資訊資產';
+const SHEET_ASSETS_NAME = '資訊資產清單';
 const SHEET_PERMISSIONS_NAME = '權限';
 
 // 定義正確的表頭陣列（含技術欄位）
@@ -449,7 +449,7 @@ function getAssetOptions() {
       try {
         const assetsSpreadsheet = SpreadsheetApp.openById(String(ASSETS_SPREADSHEET_ID).trim());
         // 嘗試抓取「資訊資產清單」，若無則退回抓取「資訊資產」
-        let assetsSheet = assetsSpreadsheet.getSheetByName('資訊資產清單');
+        let assetsSheet = assetsSpreadsheet.getSheetByName(SHEET_ASSETS_NAME);
         if (!assetsSheet) assetsSheet = assetsSpreadsheet.getSheetByName('資訊資產');
         
         if (assetsSheet) {
