@@ -146,8 +146,19 @@
             <h3 class="text-lg font-semibold text-blue-800 mb-4">1. 系統基本資訊</h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <label class="block text-sm font-medium text-gray-700">系統/設備名稱</label>
-                <input type="text" id="systemName" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                <div class="mb-2 flex items-center space-x-4 text-sm font-medium text-gray-700">
+                  <span>來源：</span>
+                  <label class="inline-flex items-center">
+                    <input type="radio" name="sourceType" value="systems" class="form-radio text-blue-600" checked onchange="handleSourceChange()">
+                    <span class="ml-1">系統清冊</span>
+                  </label>
+                  <label class="inline-flex items-center">
+                    <input type="radio" name="sourceType" value="assets" class="form-radio text-blue-600" onchange="handleSourceChange()">
+                    <span class="ml-1">資訊資產清單</span>
+                  </label>
+                </div>
+                <label class="block text-sm font-medium text-gray-700">系統 / 資訊資產</label>
+                <input type="text" id="systemName" list="assetOptionsList" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700">系統屬性</label>
@@ -195,7 +206,8 @@
     // --- 狀態管理 (使用 LocalStorage 模擬後端資料庫) ---
     const STORAGE_KEY = 'isms_backup_records';
     let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-    let assetOptions = [];
+    let systemOptionsData = [];
+    let assetOptionsData = [];
     let dashboardLoadProgress = 0;
     let dashboardLoadTimer = null;
 
@@ -277,37 +289,54 @@
       loadDashboardData({ showProgress: true });
     });
 
-    function renderAssetOptionsDatalist() {
+    function handleSourceChange() {
+      const sourceRadio = document.querySelector('input[name="sourceType"]:checked');
+      if (!sourceRadio) return;
+      const sourceType = sourceRadio.value;
       const list = document.getElementById('assetOptionsList');
       if (!list) return;
 
       list.innerHTML = '';
-      assetOptions.forEach(name => {
+      const targetData = sourceType === 'systems' ? systemOptionsData : assetOptionsData;
+      
+      targetData.forEach(name => {
         const option = document.createElement('option');
         option.value = name;
         list.appendChild(option);
       });
+      
+      // 切換來源時清空現有輸入
+      const sysNameInput = document.getElementById('systemName');
+      if (sysNameInput) sysNameInput.value = '';
+    }
+
+    function renderAssetOptionsDatalist() {
+      handleSourceChange();
     }
 
     function loadAssetOptions() {
       if (typeof google !== 'undefined' && google.script) {
         google.script.run
           .withSuccessHandler(function(response) {
-            if (response && response.success && Array.isArray(response.data)) {
-              assetOptions = response.data;
+            if (response && response.success && response.data) {
+              systemOptionsData = response.data.systems || [];
+              assetOptionsData = response.data.assets || [];
             } else {
-              assetOptions = [];
+              systemOptionsData = [];
+              assetOptionsData = [];
             }
             renderAssetOptionsDatalist();
           })
           .withFailureHandler(function() {
-            assetOptions = [];
+            systemOptionsData = [];
+            assetOptionsData = [];
             renderAssetOptionsDatalist();
           })
           .getAssetOptions();
       } else {
         // 本地測試時沒有 Apps Script 後端，保留空清單
-        assetOptions = [];
+        systemOptionsData = [];
+        assetOptionsData = [];
         renderAssetOptionsDatalist();
       }
     }
