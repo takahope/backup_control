@@ -136,6 +136,7 @@
         </div>
         
         <form id="backupForm" onsubmit="handleFormSubmit(event)">
+          <datalist id="systemOptionsList"></datalist>
           <datalist id="assetOptionsList"></datalist>
 
           <!-- 隱藏的 ID 欄位，用於判斷是新增還是更新 -->
@@ -149,16 +150,16 @@
                 <div class="mb-2 flex items-center space-x-4 text-sm font-medium text-gray-700">
                   <span>來源：</span>
                   <label class="inline-flex items-center">
-                    <input type="radio" name="sourceType" value="systems" class="form-radio text-blue-600" checked onchange="handleSourceChange()">
+                    <input type="radio" name="sourceType" value="systems" class="form-radio text-blue-600" checked onchange="handleSourceChange(true)">
                     <span class="ml-1">系統清冊</span>
                   </label>
                   <label class="inline-flex items-center">
-                    <input type="radio" name="sourceType" value="assets" class="form-radio text-blue-600" onchange="handleSourceChange()">
+                    <input type="radio" name="sourceType" value="assets" class="form-radio text-blue-600" onchange="handleSourceChange(true)">
                     <span class="ml-1">資訊資產清單</span>
                   </label>
                 </div>
                 <label class="block text-sm font-medium text-gray-700">系統 / 資訊資產</label>
-                <input type="text" id="systemName" list="assetOptionsList" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                <input type="text" id="systemName" list="systemOptionsList" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700">系統屬性</label>
@@ -289,29 +290,42 @@
       loadDashboardData({ showProgress: true });
     });
 
-    function handleSourceChange() {
+    function handleSourceChange(isUserAction = false) {
       const sourceRadio = document.querySelector('input[name="sourceType"]:checked');
       if (!sourceRadio) return;
-      const sourceType = sourceRadio.value;
-      const list = document.getElementById('assetOptionsList');
-      if (!list) return;
-
-      list.innerHTML = '';
-      const targetData = sourceType === 'systems' ? systemOptionsData : assetOptionsData;
       
-      targetData.forEach(name => {
-        const option = document.createElement('option');
-        option.value = name;
-        list.appendChild(option);
-      });
-      
-      // 切換來源時清空現有輸入
       const sysNameInput = document.getElementById('systemName');
-      if (sysNameInput) sysNameInput.value = '';
+      if (sysNameInput) {
+        sysNameInput.setAttribute('list', sourceRadio.value === 'systems' ? 'systemOptionsList' : 'assetOptionsList');
+        if (isUserAction) {
+          sysNameInput.value = '';
+        }
+      }
     }
 
     function renderAssetOptionsDatalist() {
-      handleSourceChange();
+      const sysList = document.getElementById('systemOptionsList');
+      const astList = document.getElementById('assetOptionsList');
+      
+      if (sysList) {
+        sysList.innerHTML = '';
+        systemOptionsData.forEach(name => {
+          const option = document.createElement('option');
+          option.value = name;
+          sysList.appendChild(option);
+        });
+      }
+      
+      if (astList) {
+        astList.innerHTML = '';
+        assetOptionsData.forEach(name => {
+          const option = document.createElement('option');
+          option.value = name;
+          astList.appendChild(option);
+        });
+      }
+      
+      handleSourceChange(false);
     }
 
     function loadAssetOptions() {
@@ -384,7 +398,7 @@
     }
 
     function validateLocalLocationSelection(activeTargets) {
-      if (!Array.isArray(assetOptions) || assetOptions.length === 0) return true;
+      if (!Array.isArray(assetOptionsData) || assetOptionsData.length === 0) return true;
 
       for (const t of activeTargets) {
         const inputId = t.id === 'log' ? `logLocalLoc_${t.id}` : `localLoc_${t.id}`;
@@ -393,7 +407,7 @@
 
         const value = String(input.value || '').trim();
         if (!value) continue; // required 屬性會先擋空值
-        if (!assetOptions.includes(value)) {
+        if (!assetOptionsData.includes(value)) {
           alert(`「${t.name}」的本地存放地點/設備請從下拉選單選擇有效的資訊資產。`);
           input.focus();
           return false;
