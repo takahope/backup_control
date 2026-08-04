@@ -436,7 +436,8 @@ function getAssetOptions() {
               if (!colA && !colC) return;
               
               const name = colC ? (colA ? (colA + ' - ' + colC) : colC) : colA;
-              const level = (colQ === '中級' || colQ === '高級') ? '關鍵核心系統' : '一般系統';
+              // 支援「中級」、「高級」或是單純的「中」、「高」
+              const level = (colQ === '中級' || colQ === '中' || colQ === '高級' || colQ === '高') ? '關鍵核心系統' : '一般系統';
               
               if (!seen[name]) { 
                 seen[name] = true; 
