@@ -1,5 +1,5 @@
 // Code.gs - 處理網頁請求與寫入 Google Sheets
-const SHEET_NAME = '工作表1'; // 請確認您的 Google Sheet 分頁名稱是否為此
+const SHEET_NAME = '備份管制'; // 請確認您的 Google Sheet 分頁名稱是否為此
 const SHEET_ASSETS_NAME = '資訊資產';
 const SHEET_PERMISSIONS_NAME = '權限';
 
@@ -470,7 +470,7 @@ function generateBackupControlDocument() {
 
     const sourceSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
     if (!sourceSheet) {
-      return { success: false, message: "找不到資料來源工作表（工作表1）。" };
+      return { success: false, message: "找不到資料來源工作表（備份管制）。" };
     }
 
     const templateFile = DriveApp.getFileById(String(FORM_TEMPLATE_DOC_ID).trim());
