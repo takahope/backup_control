@@ -71,7 +71,14 @@ function submitData(formData) {
     }
 
     const timestamp = new Date();
-    const systemName = String(formData.systemName || '').trim();
+    let systemId = '';
+    let parsedSystemName = String(formData.systemName || '').trim();
+    if (parsedSystemName.indexOf(' - ') !== -1) {
+      const parts = parsedSystemName.split(' - ');
+      systemId = parts[0].trim();
+      parsedSystemName = parts.slice(1).join(' - ').trim();
+    }
+    const systemName = parsedSystemName;
     const systemLevel = String(formData.systemLevel || '').trim();
     const managerName = String(formData.managerName || '').trim();
     const requestedId = String(formData.id || '').trim();
@@ -86,6 +93,7 @@ function submitData(formData) {
       }
       payloadRowsByTargetKey[targetKey] = buildSheetRowData_({
         timestamp: timestamp,
+        systemId: systemId,
         systemName: systemName,
         systemLevel: systemLevel,
         managerName: managerName,
@@ -320,20 +328,21 @@ function buildSheetRowData_(options) {
 
   return [
     options.timestamp,                                                           // A欄: 時間戳記
-    options.systemName,                                                          // B欄: 系統名稱
-    options.systemLevel,                                                         // C欄: 系統等級
-    targetName,                                                                  // D欄: 備份標的
-    diffDisplay,                                                                 // E欄: 本地_差異週期
-    fullDisplay,                                                                 // F欄: 本地_完整週期
-    retentionDisplay,                                                            // G欄: 本地_保留代數
-    target.localLocation,                                                        // H欄: 本地_存放地點
-    target.isOffsite,                                                            // I欄: 是否異地
-    offsiteCycleDisplay,                                                         // J欄: 異地_週期
-    target.isOffsite === '是' ? target.offsiteLocation : '無',                 // K欄: 異地_地點
-    offsiteRetentionDisplay,                                                     // L欄: 異地_保留代數
-    options.managerName,                                                         // M欄: 管理人員
-    options.submissionId,                                                        // N欄: submission_id
-    targetKey                                                                    // O欄: target_key
+    options.systemId,                                                            // B欄: 系統ID
+    options.systemName,                                                          // C欄: 系統名稱
+    options.systemLevel,                                                         // D欄: 系統等級
+    targetName,                                                                  // E欄: 備份標的
+    diffDisplay,                                                                 // F欄: 本地_差異週期
+    fullDisplay,                                                                 // G欄: 本地_完整週期
+    retentionDisplay,                                                            // H欄: 本地_保留代數
+    target.localLocation,                                                        // I欄: 本地_存放地點
+    target.isOffsite,                                                            // J欄: 是否異地
+    offsiteCycleDisplay,                                                         // K欄: 異地_週期
+    target.isOffsite === '是' ? target.offsiteLocation : '無',                 // L欄: 異地_地點
+    offsiteRetentionDisplay,                                                     // M欄: 異地_保留代數
+    options.managerName,                                                         // N欄: 管理人員
+    options.submissionId,                                                        // O欄: submission_id
+    targetKey                                                                    // P欄: target_key
   ];
 }
 
