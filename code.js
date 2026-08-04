@@ -440,7 +440,7 @@ function getAssetOptions() {
               
               if (!seen[name]) { 
                 seen[name] = true; 
-                result.systems.push({ name: name, level: level }); 
+                result.systems.push({ name: name, level: level, rawQ: colQ }); 
               }
             });
             result.systems.sort((a, b) => a.name.localeCompare(b.name));
@@ -480,7 +480,7 @@ function getAssetOptions() {
 
               if (!seen[name]) { 
                 seen[name] = true; 
-                result.assets.push({ name: name, level: level }); 
+                result.assets.push({ name: name, level: level, rawR: colR }); 
               }
             });
             result.assets.sort((a, b) => a.name.localeCompare(b.name));
