@@ -138,6 +138,22 @@
         <form id="backupForm" onsubmit="handleFormSubmit(event)">
           <datalist id="systemOptionsList"></datalist>
           <datalist id="assetOptionsList"></datalist>
+          <datalist id="dispositionMethodList">
+            <option value="磁碟自動覆寫">
+            <option value="磁帶消磁銷毀">
+            <option value="實體銷毀">
+            <option value="封存至離線媒體">
+          </datalist>
+          <datalist id="evidenceList_local">
+            <option value="備份系統執行Log">
+            <option value="資料庫備份歷程表">
+            <option value="排程備份通知信件">
+          </datalist>
+          <datalist id="evidenceList_offsite">
+            <option value="磁帶消磁簽收單 / 雲端過期報表">
+            <option value="異地同步執行Log">
+            <option value="雲端存取稽核報告">
+          </datalist>
 
           <!-- 隱藏的 ID 欄位，用於判斷是新增還是更新 -->
           <input type="hidden" id="systemId" value="">
@@ -253,9 +269,16 @@
         ? safeText(target.logRetention, '無')
         : formatRetention(target.localRetention);
       const localLocation = safeText(target.localLocation, '未填寫');
+      const localSchedule = safeText(target.localScheduleTime, '每日 00:00');
+      const localDisp = safeText(target.localDispositionMethod, '磁碟自動覆寫');
+      const localEvid = safeText(target.localEvidenceRequirements, '備份系統執行Log');
+
       const offsiteCycle = isLogTarget ? '不適用' : (offsiteEnabled ? formatCycle(target.offsiteFreqValue, target.offsiteFreqUnit) : '無');
       const offsiteLocation = offsiteEnabled ? safeText(target.offsiteLocation, '未填寫') : '無';
       const offsiteRetention = isLogTarget ? '不適用' : (offsiteEnabled ? formatRetention(target.offsiteRetention) : '無');
+      const offsiteSchedule = offsiteEnabled ? safeText(target.offsiteScheduleTime, '每日 00:00') : '無';
+      const offsiteDisp = offsiteEnabled ? safeText(target.offsiteDispositionMethod, '磁碟自動覆寫') : '無';
+      const offsiteEvid = offsiteEnabled ? safeText(target.offsiteEvidenceRequirements, '磁帶消磁簽收單 / 雲端過期報表') : '無';
 
       return `
         <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2">
@@ -265,10 +288,19 @@
             <div><span class="text-gray-500">本地完整：</span>${localFull}</div>
             <div><span class="text-gray-500">本地保留：</span>${localRetention}</div>
             <div><span class="text-gray-500">本地位置：</span>${localLocation}</div>
+            <div><span class="text-gray-500">本地排程：</span>${localSchedule}</div>
+            <div><span class="text-gray-500">本地處置：</span>${localDisp}</div>
+            <div class="md:col-span-2"><span class="text-gray-500">本地佐證：</span>${localEvid}</div>
+            <div class="border-t border-gray-200 my-1 md:col-span-2"></div>
             <div><span class="text-gray-500">是否異地：</span>${offsiteEnabled ? '是' : '否'}</div>
             <div><span class="text-gray-500">異地週期：</span>${offsiteCycle}</div>
             <div><span class="text-gray-500">異地位置：</span>${offsiteLocation}</div>
             <div><span class="text-gray-500">異地保留：</span>${offsiteRetention}</div>
+            ${offsiteEnabled ? `
+            <div><span class="text-gray-500">異地排程：</span>${offsiteSchedule}</div>
+            <div><span class="text-gray-500">異地處置：</span>${offsiteDisp}</div>
+            <div class="md:col-span-2"><span class="text-gray-500">異地佐證：</span>${offsiteEvid}</div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -655,12 +687,51 @@
       });
     }
 
-    // --- 刪除系統 ---
+    // --- 刪除系統（後端封存並刪除，前端連動） ---
     function deleteSystem(id) {
-      if(confirm('確定要刪除此系統的備份設定嗎？此動作無法復原。')) {
-        appData = appData.filter(s => s.id !== id);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
-        renderDashboard();
+      const targetSystem = appData.find(s => s.id === id);
+      const systemTitle = targetSystem ? targetSystem.systemName : '此系統';
+
+      if (!confirm(`確定要刪除「${systemTitle}」的備份設定嗎？\n\n系統將自動將舊設定封存至「備份管制_歷程」工作表，並從目前清單中永久移除。`)) {
+        return;
+      }
+
+      // 取得觸發刪除的按鈕並設為處理中狀態，防止重複點擊
+      const deleteBtn = document.querySelector(`button[data-action="delete"][data-id="${id}"]`);
+      if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteBtn.innerText = '刪除中...';
+        deleteBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+
+      if (typeof google !== 'undefined' && google.script) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            if (response && response.success === true) {
+              appData = appData.filter(s => s.id !== id);
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+              renderDashboard();
+              alert(response.message || '系統備份設定已成功刪除並封存！');
+            } else {
+              const errMsg = (response && response.message) ? response.message : '後端刪除失敗。';
+              alert('刪除失敗：' + errMsg);
+              loadDashboardData();
+            }
+          })
+          .withFailureHandler(function(error) {
+            const errMsg = (error && error.message) ? error.message : '連線失敗或後端拋出例外。';
+            alert('刪除請求失敗：' + errMsg);
+            loadDashboardData();
+          })
+          .deleteSubmission(id);
+      } else {
+        // 本地模擬刪除
+        setTimeout(() => {
+          appData = appData.filter(s => s.id !== id);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+          renderDashboard();
+          alert('（本地測試環境）設定已刪除並模擬封存。');
+        }, 300);
       }
     }
 
@@ -697,6 +768,7 @@
           toggleTarget(tid);
 
           // 填值
+          // 本地存放地點
           if (tid === 'log') {
             // 解析 "保存 X 單位"
             if(tData.logRetention) {
@@ -719,6 +791,14 @@
             document.getElementById(`localLoc_${tid}`).value = tData.localLocation;
           }
 
+          // 本地擴充欄位回填
+          const elLocalSched = document.getElementById(`localScheduleTime_${tid}`);
+          const elLocalDisp = document.getElementById(`localDispositionMethod_${tid}`);
+          const elLocalEvid = document.getElementById(`localEvidenceRequirements_${tid}`);
+          if (elLocalSched) elLocalSched.value = tData.localScheduleTime || '每日 00:00';
+          if (elLocalDisp) elLocalDisp.value = tData.localDispositionMethod || '磁碟自動覆寫';
+          if (elLocalEvid) elLocalEvid.value = tData.localEvidenceRequirements || '備份系統執行Log';
+
           // 異地存放設定
           if (tData.isOffsite === '是') {
             document.querySelector(`input[name="offsite_${tid}"][value="是"]`).checked = true;
@@ -727,9 +807,21 @@
             document.getElementById(`offsiteFreqUnit_${tid}`).value = tData.offsiteFreqUnit;
             document.getElementById(`offsiteLoc_${tid}`).value = tData.offsiteLocation;
             document.getElementById(`offsiteRet_${tid}`).value = tData.offsiteRetention;
+            const elOffSched = document.getElementById(`offsiteScheduleTime_${tid}`);
+            const elOffDisp = document.getElementById(`offsiteDispositionMethod_${tid}`);
+            const elOffEvid = document.getElementById(`offsiteEvidenceRequirements_${tid}`);
+            if (elOffSched) elOffSched.value = tData.offsiteScheduleTime || '每日 00:00';
+            if (elOffDisp) elOffDisp.value = tData.offsiteDispositionMethod || '磁碟自動覆寫';
+            if (elOffEvid) elOffEvid.value = tData.offsiteEvidenceRequirements || '磁帶消磁簽收單 / 雲端過期報表';
           } else {
             document.querySelector(`input[name="offsite_${tid}"][value="否"]`).checked = true;
             toggleOffsite(tid, false);
+            const elOffSched = document.getElementById(`offsiteScheduleTime_${tid}`);
+            const elOffDisp = document.getElementById(`offsiteDispositionMethod_${tid}`);
+            const elOffEvid = document.getElementById(`offsiteEvidenceRequirements_${tid}`);
+            if (elOffSched) elOffSched.value = '每日 00:00';
+            if (elOffDisp) elOffDisp.value = '磁碟自動覆寫';
+            if (elOffEvid) elOffEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
           }
         }
       });
@@ -752,7 +844,22 @@
       document.getElementById('cancelEditBtn').classList.add('hidden');
       document.getElementById('submitBtn').innerText = '儲存並送出紀錄';
       
-      backupTargets.forEach(t => toggleTarget(t.id));
+      backupTargets.forEach(t => {
+        toggleTarget(t.id);
+        const elLocalSched = document.getElementById(`localScheduleTime_${t.id}`);
+        const elLocalDisp = document.getElementById(`localDispositionMethod_${t.id}`);
+        const elLocalEvid = document.getElementById(`localEvidenceRequirements_${t.id}`);
+        if (elLocalSched) elLocalSched.value = '每日 00:00';
+        if (elLocalDisp) elLocalDisp.value = '磁碟自動覆寫';
+        if (elLocalEvid) elLocalEvid.value = '備份系統執行Log';
+
+        const elOffSched = document.getElementById(`offsiteScheduleTime_${t.id}`);
+        const elOffDisp = document.getElementById(`offsiteDispositionMethod_${t.id}`);
+        const elOffEvid = document.getElementById(`offsiteEvidenceRequirements_${t.id}`);
+        if (elOffSched) elOffSched.value = '每日 00:00';
+        if (elOffDisp) elOffDisp.value = '磁碟自動覆寫';
+        if (elOffEvid) elOffEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
+      });
     }
 
 
@@ -783,6 +890,18 @@
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
                 <input type="search" list="assetOptionsList" id="logLocalLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+              </div>
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地排程時間 <span class="text-red-500">*</span></label>
+                <input type="text" id="localScheduleTime_${target.id}" value="每日 00:00" placeholder="例如: 每日 00:00" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+              </div>
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
+                <input type="text" list="dispositionMethodList" id="localDispositionMethod_${target.id}" value="磁碟自動覆寫" placeholder="請選擇或輸入處置方法" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+              </div>
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地佐證種類 <span class="text-red-500">*</span></label>
+                <input type="text" list="evidenceList_local" id="localEvidenceRequirements_${target.id}" value="備份系統執行Log" placeholder="請選擇或輸入佐證種類" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
               </div>
             </div>
           `;
@@ -824,6 +943,19 @@
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
                 <input type="search" list="assetOptionsList" id="localLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+              </div>
+
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地排程時間 <span class="text-red-500">*</span></label>
+                <input type="text" id="localScheduleTime_${target.id}" value="每日 00:00" placeholder="例如: 每日 00:00" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+              </div>
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
+                <input type="text" list="dispositionMethodList" id="localDispositionMethod_${target.id}" value="磁碟自動覆寫" placeholder="請選擇或輸入處置方法" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+              </div>
+              <div class="flex flex-col mt-2">
+                <label class="block text-sm font-medium text-gray-600 mb-1">本地佐證種類 <span class="text-red-500">*</span></label>
+                <input type="text" list="evidenceList_local" id="localEvidenceRequirements_${target.id}" value="備份系統執行Log" placeholder="請選擇或輸入佐證種類" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
               </div>
             </div>
           `;
@@ -886,6 +1018,19 @@
                       <input type="number" id="offsiteRet_${target.id}" min="1" class="block w-20 rounded-md border-purple-300 shadow-sm p-2 border text-center focus:ring-purple-500">
                       <span class="ml-2 text-sm text-purple-700">代</span>
                     </div>
+
+                    <div>
+                      <label class="block text-sm font-medium text-purple-800 mb-1">異地排程時間 <span class="text-red-500">*</span></label>
+                      <input type="text" id="offsiteScheduleTime_${target.id}" value="每日 00:00" placeholder="例如: 每日 00:00" class="block w-full rounded-md border-purple-300 shadow-sm p-2 border focus:ring-purple-500">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-purple-800 mb-1">異地處置方法 <span class="text-red-500">*</span></label>
+                      <input type="text" list="dispositionMethodList" id="offsiteDispositionMethod_${target.id}" value="磁碟自動覆寫" placeholder="請選擇或輸入處置方法" class="block w-full rounded-md border-purple-300 shadow-sm p-2 border focus:ring-purple-500">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-purple-800 mb-1">異地佐證種類 <span class="text-red-500">*</span></label>
+                      <input type="text" list="evidenceList_offsite" id="offsiteEvidenceRequirements_${target.id}" value="磁帶消磁簽收單 / 雲端過期報表" placeholder="請選擇或輸入佐證種類" class="block w-full rounded-md border-purple-300 shadow-sm p-2 border focus:ring-purple-500">
+                    </div>
                   </div>
                 </div>
 
@@ -920,6 +1065,13 @@
           document.getElementById(`localRet_${targetId}`).required = !isAllRetention;
           document.getElementById(`localLoc_${targetId}`).required = true;
         }
+
+        const elLocalSched = document.getElementById(`localScheduleTime_${targetId}`);
+        const elLocalDisp = document.getElementById(`localDispositionMethod_${targetId}`);
+        const elLocalEvid = document.getElementById(`localEvidenceRequirements_${targetId}`);
+        if (elLocalSched) elLocalSched.required = true;
+        if (elLocalDisp) elLocalDisp.required = true;
+        if (elLocalEvid) elLocalEvid.required = true;
       } else {
         details.style.display = 'none';
         badge.innerText = '無此標的';
@@ -935,6 +1087,13 @@
           document.getElementById(`localRetAll_${targetId}`).checked = false;
           toggleLocalRetentionMode(targetId);
         }
+
+        const elLocalSched = document.getElementById(`localScheduleTime_${targetId}`);
+        const elLocalDisp = document.getElementById(`localDispositionMethod_${targetId}`);
+        const elLocalEvid = document.getElementById(`localEvidenceRequirements_${targetId}`);
+        if (elLocalSched) { elLocalSched.required = false; elLocalSched.value = '每日 00:00'; }
+        if (elLocalDisp) { elLocalDisp.required = false; elLocalDisp.value = '磁碟自動覆寫'; }
+        if (elLocalEvid) { elLocalEvid.required = false; elLocalEvid.value = '備份系統執行Log'; }
         
         document.querySelector(`input[name="offsite_${targetId}"][value="否"]`).checked = true;
         toggleOffsite(targetId, false);
@@ -969,6 +1128,12 @@
       } else {
         section.style.display = 'none';
         inputs.forEach(input => input.required = false);
+        const offSched = document.getElementById(`offsiteScheduleTime_${targetId}`);
+        const offDisp = document.getElementById(`offsiteDispositionMethod_${targetId}`);
+        const offEvid = document.getElementById(`offsiteEvidenceRequirements_${targetId}`);
+        if (offSched) offSched.value = '每日 00:00';
+        if (offDisp) offDisp.value = '磁碟自動覆寫';
+        if (offEvid) offEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
       }
     }
 
@@ -1001,6 +1166,13 @@
           logRetention = '保存 ' + document.getElementById(`logRetVal_${t.id}`).value + ' ' + document.getElementById(`logRetUnit_${t.id}`).value;
         }
 
+        const localScheduleEl = document.getElementById(`localScheduleTime_${t.id}`);
+        const localDispEl = document.getElementById(`localDispositionMethod_${t.id}`);
+        const localEvidEl = document.getElementById(`localEvidenceRequirements_${t.id}`);
+        const offsiteScheduleEl = document.getElementById(`offsiteScheduleTime_${t.id}`);
+        const offsiteDispEl = document.getElementById(`offsiteDispositionMethod_${t.id}`);
+        const offsiteEvidEl = document.getElementById(`offsiteEvidenceRequirements_${t.id}`);
+
         return {
           targetKey: t.id,
           targetName: t.name,
@@ -1012,12 +1184,18 @@
             ? (document.getElementById(`localRetAll_${t.id}`).checked ? 'ALL' : document.getElementById(`localRet_${t.id}`).value)
             : logRetention,
           localLocation: t.id !== 'log' ? document.getElementById(`localLoc_${t.id}`).value : document.getElementById(`logLocalLoc_${t.id}`).value,
+          localScheduleTime: localScheduleEl ? (localScheduleEl.value.trim() || '每日 00:00') : '每日 00:00',
+          localDispositionMethod: localDispEl ? (localDispEl.value.trim() || '磁碟自動覆寫') : '磁碟自動覆寫',
+          localEvidenceRequirements: localEvidEl ? (localEvidEl.value.trim() || '備份系統執行Log') : '備份系統執行Log',
           logRetention: logRetention,
           isOffsite: isOffsite,
           offsiteFreqValue: isOffsite === '是' ? document.getElementById(`offsiteFreqValue_${t.id}`).value : '',
           offsiteFreqUnit: isOffsite === '是' ? document.getElementById(`offsiteFreqUnit_${t.id}`).value : '',
           offsiteLocation: isOffsite === '是' ? document.getElementById(`offsiteLoc_${t.id}`).value : '',
-          offsiteRetention: isOffsite === '是' ? document.getElementById(`offsiteRet_${t.id}`).value : ''
+          offsiteRetention: isOffsite === '是' ? document.getElementById(`offsiteRet_${t.id}`).value : '',
+          offsiteScheduleTime: isOffsite === '是' ? (offsiteScheduleEl ? (offsiteScheduleEl.value.trim() || '每日 00:00') : '每日 00:00') : '無',
+          offsiteDispositionMethod: isOffsite === '是' ? (offsiteDispEl ? (offsiteDispEl.value.trim() || '磁碟自動覆寫') : '磁碟自動覆寫') : '無',
+          offsiteEvidenceRequirements: isOffsite === '是' ? (offsiteEvidEl ? (offsiteEvidEl.value.trim() || '磁帶消磁簽收單 / 雲端過期報表') : '磁帶消磁簽收單 / 雲端過期報表') : '無'
         };
       });
 
@@ -1088,6 +1266,7 @@
           statusMessage.classList.add('hidden'); 
           resetForm();
           switchTab('dashboard'); // 送出成功後自動跳轉回儀表板
+          loadDashboardData({ showProgress: false }); // 背景同步後端主表最新資料
         }, 1500);
       }
 

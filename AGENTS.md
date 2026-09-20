@@ -53,3 +53,7 @@ PRs should include:
 - Never commit real spreadsheet IDs or secrets to shared branches.
 - Ensure `ASSETS_SPREADSHEET_ID` points to the correct external file and access is granted.
 - Keep permission checks server-side for every data API, not only `doGet`.
+
+## Incident & Change Log
+- 2026-09-20: 實作跨專案資料契約「備份管制表 20 欄（含 2 欄技術欄位共 22 欄）」升級；後端建立 Header-Aware 動態表頭解析與零停機平滑資料遷移機制，並新增管理員專用一鍵安全遷移工具 `runDataMigration`（含事前自動快照備份）；前端表單與儀表板擴充本地／異地排程時間（預設 每日 00:00）、處置方法（預設 磁碟自動覆寫）及佐證種類；文件生成維護原有核定格式不改動。
+- 2026-09-19: 修復編輯時 `isRowBelongsToSubmission_` 因欄位索引錯位（Index 13 誤判為 submission_id）導致誤將更新判為新增的問題；實作雙軌制歷程封存，在主表原地更新與刪除前先將舊資料快照寫入「備份管制_歷程」工作表，並補齊後端 `deleteSubmission` API。
