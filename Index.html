@@ -308,6 +308,232 @@
       return parsed;
     }
 
+    function setVisible_(el, visible) {
+      if (!el) return;
+      if (visible) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    }
+
+    function renderSchedulePickerTrackHtml(targetId, track, title) {
+      const isOffsite = track === 'offsite';
+      const isDiff = track === 'diff';
+      const labelColor = isOffsite ? 'text-purple-700' : 'text-gray-500';
+      const borderColor = isOffsite ? 'border-purple-300' : 'border-gray-300';
+      const versionTagBg = isOffsite ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800';
+      const hiddenClass = isDiff ? ' hidden' : '';
+      const displayTitle = title ? (title.endsWith(':') || title.endsWith('：') ? title : title + ':') : '';
+
+      let monthOptions = '';
+      for (let m = 1; m <= 12; m++) {
+        monthOptions += `<option value="${m}"${m === 12 ? ' selected' : ''}>${m} 月</option>`;
+      }
+
+      let dayOptions = '';
+      for (let d = 1; d <= 31; d++) {
+        dayOptions += `<option value="${d}"${d === 1 ? ' selected' : ''}>${d} 日</option>`;
+      }
+      dayOptions += `<option value="月底最後一日">月底最後一日</option>`;
+
+      const weekdayOptions = `
+        <option value="日" selected>每週日</option>
+        <option value="一">每週一</option>
+        <option value="二">每週二</option>
+        <option value="三">每週三</option>
+        <option value="四">每週四</option>
+        <option value="五">每週五</option>
+        <option value="六">每週六</option>
+      `;
+
+      return `
+        <div id="${track}SchedulePicker_${targetId}" class="schedule-picker-track flex flex-wrap items-center gap-2${hiddenClass}">
+          <span class="text-xs font-semibold ${labelColor} w-16">${displayTitle}</span>
+          <span id="${track}SchedPrefix_${targetId}" class="prefix-label text-sm text-gray-700">每日</span>
+          <select id="${track}SchedMonth_${targetId}" class="hidden sched-month rounded-md ${borderColor} p-1.5 text-sm" onchange="syncTargetSchedule('${targetId}')">
+            ${monthOptions}
+          </select>
+          <select id="${track}SchedDay_${targetId}" class="hidden sched-day rounded-md ${borderColor} p-1.5 text-sm" onchange="syncTargetSchedule('${targetId}')">
+            ${dayOptions}
+          </select>
+          <select id="${track}SchedWeekday_${targetId}" class="hidden sched-weekday rounded-md ${borderColor} p-1.5 text-sm" onchange="syncTargetSchedule('${targetId}')">
+            ${weekdayOptions}
+          </select>
+          <input type="time" id="${track}SchedTime_${targetId}" class="sched-time rounded-md ${borderColor} p-1.5 text-sm" value="00:00" oninput="syncTargetSchedule('${targetId}')" onchange="syncTargetSchedule('${targetId}')">
+          <span id="${track}SchedVersionTag_${targetId}" class="hidden text-xs ${versionTagBg} px-2 py-1 rounded">每次版本發布</span>
+        </div>
+      `;
+    }
+
+    function updateSchedulePickerUI(targetId, track, unit) {
+      const u = String(unit || '天').trim();
+      const prefixEl = document.getElementById(`${track}SchedPrefix_${targetId}`);
+      const monthEl = document.getElementById(`${track}SchedMonth_${targetId}`);
+      const dayEl = document.getElementById(`${track}SchedDay_${targetId}`);
+      const weekdayEl = document.getElementById(`${track}SchedWeekday_${targetId}`);
+      const timeEl = document.getElementById(`${track}SchedTime_${targetId}`);
+      const versionTagEl = document.getElementById(`${track}SchedVersionTag_${targetId}`);
+
+      if (u === '週') {
+        if (prefixEl) {
+          prefixEl.textContent = '';
+          setVisible_(prefixEl, false);
+        }
+        setVisible_(monthEl, false);
+        setVisible_(dayEl, false);
+        setVisible_(weekdayEl, true);
+        setVisible_(timeEl, true);
+        setVisible_(versionTagEl, false);
+      } else if (u === '個月') {
+        if (prefixEl) {
+          prefixEl.textContent = '每月';
+          setVisible_(prefixEl, true);
+        }
+        if (dayEl && (dayEl.value === '31' || !dayEl.value)) dayEl.value = '1';
+        setVisible_(monthEl, false);
+        setVisible_(dayEl, true);
+        setVisible_(weekdayEl, false);
+        setVisible_(timeEl, true);
+        setVisible_(versionTagEl, false);
+      } else if (u === '年') {
+        if (prefixEl) {
+          prefixEl.textContent = '每年';
+          setVisible_(prefixEl, true);
+        }
+        if (monthEl && !monthEl.value) monthEl.value = '12';
+        if (dayEl && (dayEl.value === '1' || !dayEl.value)) dayEl.value = '31';
+        setVisible_(monthEl, true);
+        setVisible_(dayEl, true);
+        setVisible_(weekdayEl, false);
+        setVisible_(timeEl, true);
+        setVisible_(versionTagEl, false);
+      } else if (u === '版本') {
+        if (prefixEl) {
+          prefixEl.textContent = '';
+          setVisible_(prefixEl, false);
+        }
+        setVisible_(monthEl, false);
+        setVisible_(dayEl, false);
+        setVisible_(weekdayEl, false);
+        setVisible_(timeEl, false);
+        setVisible_(versionTagEl, true);
+      } else {
+        // 預設為天
+        if (prefixEl) {
+          prefixEl.textContent = '每日';
+          setVisible_(prefixEl, true);
+        }
+        setVisible_(monthEl, false);
+        setVisible_(dayEl, false);
+        setVisible_(weekdayEl, false);
+        setVisible_(timeEl, true);
+        setVisible_(versionTagEl, false);
+      }
+    }
+
+    function updateDiffPickerVisibility(targetId) {
+      const diffValInput = document.getElementById(`diffValue_${targetId}`);
+      const diffPicker = document.getElementById(`diffSchedulePicker_${targetId}`);
+      const val = parseFloat(diffValInput ? diffValInput.value : 0) || 0;
+      if (diffPicker) {
+        if (val > 0) {
+          diffPicker.classList.remove('hidden');
+        } else {
+          diffPicker.classList.add('hidden');
+        }
+      }
+      syncTargetSchedule(targetId);
+    }
+
+    function syncTargetSchedule(targetId) {
+      if (targetId === 'log') {
+        const timeEl = document.getElementById(`fullSchedTime_${targetId}`);
+        const time = timeEl ? timeEl.value.trim() : '00:00';
+        const localStr = formatTrackSchedule('天', time, {});
+        const localInput = document.getElementById(`localScheduleTime_${targetId}`);
+        if (localInput) localInput.value = localStr;
+        const localPreview = document.getElementById(`localSchedulePreview_${targetId}`);
+        if (localPreview) localPreview.textContent = `排程設定值: ${localStr}`;
+      } else {
+        // 完整備份軌
+        const fullUnitEl = document.getElementById(`fullUnit_${targetId}`);
+        const fullUnit = fullUnitEl ? fullUnitEl.value : '天';
+        const fullTimeEl = document.getElementById(`fullSchedTime_${targetId}`);
+        const fullTime = fullTimeEl ? fullTimeEl.value.trim() : '00:00';
+        const fullWeekdayEl = document.getElementById(`fullSchedWeekday_${targetId}`);
+        const fullWeekday = fullWeekdayEl ? fullWeekdayEl.value : '日';
+        const fullMonthEl = document.getElementById(`fullSchedMonth_${targetId}`);
+        const fullMonth = fullMonthEl ? fullMonthEl.value : '12';
+        const fullDayEl = document.getElementById(`fullSchedDay_${targetId}`);
+        const fullDay = fullDayEl ? fullDayEl.value : '1';
+
+        const fullSchedule = formatTrackSchedule(fullUnit, fullTime, {
+          weekday: fullWeekday,
+          month: fullMonth,
+          day: fullDay
+        });
+
+        // 差異備份軌
+        const diffValEl = document.getElementById(`diffValue_${targetId}`);
+        const diffVal = parseFloat(diffValEl ? diffValEl.value : 0) || 0;
+        const hasDiff = diffVal > 0;
+        let diffSchedule = '';
+        if (hasDiff) {
+          const diffUnitEl = document.getElementById(`diffUnit_${targetId}`);
+          const diffUnit = diffUnitEl ? diffUnitEl.value : '天';
+          const diffTimeEl = document.getElementById(`diffSchedTime_${targetId}`);
+          const diffTime = diffTimeEl ? diffTimeEl.value.trim() : '00:00';
+          const diffWeekdayEl = document.getElementById(`diffSchedWeekday_${targetId}`);
+          const diffWeekday = diffWeekdayEl ? diffWeekdayEl.value : '日';
+          const diffMonthEl = document.getElementById(`diffSchedMonth_${targetId}`);
+          const diffMonth = diffMonthEl ? diffMonthEl.value : '12';
+          const diffDayEl = document.getElementById(`diffSchedDay_${targetId}`);
+          const diffDay = diffDayEl ? diffDayEl.value : '1';
+
+          diffSchedule = formatTrackSchedule(diffUnit, diffTime, {
+            weekday: diffWeekday,
+            month: diffMonth,
+            day: diffDay
+          });
+        }
+
+        const localStr = composeDualTrackSchedule({
+          hasDiff,
+          fullSchedule,
+          diffSchedule
+        });
+
+        const localInput = document.getElementById(`localScheduleTime_${targetId}`);
+        if (localInput) localInput.value = localStr;
+        const localPreview = document.getElementById(`localSchedulePreview_${targetId}`);
+        if (localPreview) localPreview.textContent = `排程設定值: ${localStr}`;
+      }
+
+      // 異地存放軌 (所有標的包含 log 皆適用)
+      const offsiteUnitEl = document.getElementById(`offsiteFreqUnit_${targetId}`);
+      const offsiteUnit = offsiteUnitEl ? offsiteUnitEl.value : '天';
+      const offsiteTimeEl = document.getElementById(`offsiteSchedTime_${targetId}`);
+      const offsiteTime = offsiteTimeEl ? offsiteTimeEl.value.trim() : '00:00';
+      const offsiteWeekdayEl = document.getElementById(`offsiteSchedWeekday_${targetId}`);
+      const offsiteWeekday = offsiteWeekdayEl ? offsiteWeekdayEl.value : '日';
+      const offsiteMonthEl = document.getElementById(`offsiteSchedMonth_${targetId}`);
+      const offsiteMonth = offsiteMonthEl ? offsiteMonthEl.value : '12';
+      const offsiteDayEl = document.getElementById(`offsiteSchedDay_${targetId}`);
+      const offsiteDay = offsiteDayEl ? offsiteDayEl.value : '1';
+
+      const offsiteStr = formatTrackSchedule(offsiteUnit, offsiteTime, {
+        weekday: offsiteWeekday,
+        month: offsiteMonth,
+        day: offsiteDay
+      });
+
+      const offsiteInput = document.getElementById(`offsiteScheduleTime_${targetId}`);
+      if (offsiteInput) offsiteInput.value = offsiteStr;
+      const offsitePreview = document.getElementById(`offsiteSchedulePreview_${targetId}`);
+      if (offsitePreview) offsitePreview.textContent = `排程設定值: ${offsiteStr}`;
+    }
+
     // --- 狀態管理 (使用 LocalStorage 模擬後端資料庫) ---
     const STORAGE_KEY = 'isms_backup_records';
     let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
@@ -980,7 +1206,15 @@
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地排程時間 <span class="text-red-500">*</span></label>
-                <input type="text" id="localScheduleTime_${target.id}" value="每日 00:00" placeholder="例如: 每日 00:00" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                <div class="local-schedule-composite space-y-2">
+                  <div id="fullSchedulePicker_${target.id}" class="schedule-picker-track flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-semibold text-gray-500 w-16">本地排程:</span>
+                    <span id="fullSchedPrefix_${target.id}" class="prefix-label text-sm text-gray-700">每日</span>
+                    <input type="time" id="fullSchedTime_${target.id}" class="sched-time rounded-md border-gray-300 p-1.5 text-sm" value="00:00" oninput="syncTargetSchedule('${target.id}')" onchange="syncTargetSchedule('${target.id}')">
+                  </div>
+                  <input type="hidden" id="localScheduleTime_${target.id}" value="每日 00:00">
+                  <div class="text-xs text-blue-600 font-mono mt-1" id="localSchedulePreview_${target.id}">排程設定值: 每日 00:00</div>
+                </div>
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
@@ -1000,8 +1234,8 @@
               <div class="flex flex-col">
                 <label class="block text-sm font-medium text-gray-600 mb-1">每 ___ 執行「差異備份」</label>
                 <div class="flex">
-                  <input type="number" id="diffValue_${target.id}" min="0" placeholder="0代表無" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
-                  <select id="diffUnit_${target.id}" class="block w-full rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
+                  <input type="number" id="diffValue_${target.id}" min="0" placeholder="0代表無" oninput="updateDiffPickerVisibility('${target.id}')" onchange="updateDiffPickerVisibility('${target.id}')" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
+                  <select id="diffUnit_${target.id}" onchange="updateSchedulePickerUI('${target.id}', 'diff', this.value); syncTargetSchedule('${target.id}');" class="block w-full rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
                     <option value="天">天</option><option value="週">週</option><option value="個月">個月</option><option value="年">年</option><option value="版本">版本</option>
                   </select>
                 </div>
@@ -1011,7 +1245,7 @@
                 <label class="block text-sm font-medium text-gray-600 mb-1">每 ___ 執行「完整備份」 <span class="text-red-500">*</span></label>
                 <div class="flex">
                   <input type="number" id="fullValue_${target.id}" min="1" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
-                  <select id="fullUnit_${target.id}" class="block w-full rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
+                  <select id="fullUnit_${target.id}" onchange="updateSchedulePickerUI('${target.id}', 'full', this.value); syncTargetSchedule('${target.id}');" class="block w-full rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
                     <option value="天">天</option><option value="週">週</option><option value="個月">個月</option><option value="年">年</option><option value="版本">版本</option>
                   </select>
                 </div>
@@ -1034,7 +1268,12 @@
 
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地排程時間 <span class="text-red-500">*</span></label>
-                <input type="text" id="localScheduleTime_${target.id}" value="每日 00:00" placeholder="例如: 每日 00:00" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                <div class="local-schedule-composite space-y-2">
+                  ${renderSchedulePickerTrackHtml(target.id, 'full', '完整排程:')}
+                  ${renderSchedulePickerTrackHtml(target.id, 'diff', '差異排程:')}
+                  <input type="hidden" id="localScheduleTime_${target.id}" value="每日 00:00">
+                  <div class="text-xs text-blue-600 font-mono mt-1" id="localSchedulePreview_${target.id}">排程設定值: 每日 00:00</div>
+                </div>
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
@@ -1089,7 +1328,7 @@
                       <label class="block text-sm font-medium text-purple-800 mb-1">每 ___ 執行「異地存放」 <span class="text-red-500">*</span></label>
                       <div class="flex">
                         <input type="number" id="offsiteFreqValue_${target.id}" min="1" class="block w-20 rounded-l-md border-purple-300 shadow-sm p-2 border text-center focus:ring-purple-500">
-                        <select id="offsiteFreqUnit_${target.id}" class="block w-full rounded-r-md border-purple-300 shadow-sm p-2 border border-l-0 bg-white">
+                        <select id="offsiteFreqUnit_${target.id}" onchange="updateSchedulePickerUI('${target.id}', 'offsite', this.value); syncTargetSchedule('${target.id}');" class="block w-full rounded-r-md border-purple-300 shadow-sm p-2 border border-l-0 bg-white">
                           <option value="天">天</option><option value="週">週</option><option value="個月">個月</option><option value="年">年</option><option value="版本">版本</option>
                         </select>
                       </div>
@@ -1108,7 +1347,11 @@
 
                     <div>
                       <label class="block text-sm font-medium text-purple-800 mb-1">異地排程時間 <span class="text-red-500">*</span></label>
-                      <input type="text" id="offsiteScheduleTime_${target.id}" value="每日 00:00" placeholder="例如: 每日 00:00" class="block w-full rounded-md border-purple-300 shadow-sm p-2 border focus:ring-purple-500">
+                      <div class="offsite-schedule-composite space-y-2">
+                        ${renderSchedulePickerTrackHtml(target.id, 'offsite', '異地排程:')}
+                        <input type="hidden" id="offsiteScheduleTime_${target.id}" value="每日 00:00">
+                        <div class="text-xs text-purple-700 font-mono mt-1" id="offsiteSchedulePreview_${target.id}">排程設定值: 每日 00:00</div>
+                      </div>
                     </div>
                     <div>
                       <label class="block text-sm font-medium text-purple-800 mb-1">異地處置方法 <span class="text-red-500">*</span></label>
@@ -1126,7 +1369,27 @@
           </div>
         `;
       });
-      container.innerHTML = html;
+
+      if (container) {
+        container.innerHTML = html;
+
+        // 初始化各標的之排程選擇器狀態
+        backupTargets.forEach(target => {
+          if (target.id !== 'log') {
+            const fullUnitEl = document.getElementById(`fullUnit_${target.id}`);
+            const fullUnit = fullUnitEl ? fullUnitEl.value : '天';
+            const diffUnitEl = document.getElementById(`diffUnit_${target.id}`);
+            const diffUnit = diffUnitEl ? diffUnitEl.value : '天';
+            updateSchedulePickerUI(target.id, 'full', fullUnit);
+            updateSchedulePickerUI(target.id, 'diff', diffUnit);
+            updateDiffPickerVisibility(target.id);
+          }
+          const offsiteUnitEl = document.getElementById(`offsiteFreqUnit_${target.id}`);
+          const offsiteUnit = offsiteUnitEl ? offsiteUnitEl.value : '天';
+          updateSchedulePickerUI(target.id, 'offsite', offsiteUnit);
+          syncTargetSchedule(target.id);
+        });
+      }
     }
 
     // 控制「個別標的」卡片的展開與必填邏輯
@@ -1156,7 +1419,7 @@
         const elLocalSched = document.getElementById(`localScheduleTime_${targetId}`);
         const elLocalDisp = document.getElementById(`localDispositionMethod_${targetId}`);
         const elLocalEvid = document.getElementById(`localEvidenceRequirements_${targetId}`);
-        if (elLocalSched) elLocalSched.required = true;
+        if (elLocalSched && elLocalSched.type !== 'hidden') elLocalSched.required = true;
         if (elLocalDisp) elLocalDisp.required = true;
         if (elLocalEvid) elLocalEvid.required = true;
       } else {
@@ -1178,7 +1441,10 @@
         const elLocalSched = document.getElementById(`localScheduleTime_${targetId}`);
         const elLocalDisp = document.getElementById(`localDispositionMethod_${targetId}`);
         const elLocalEvid = document.getElementById(`localEvidenceRequirements_${targetId}`);
-        if (elLocalSched) { elLocalSched.required = false; elLocalSched.value = '每日 00:00'; }
+        if (elLocalSched) {
+          if (elLocalSched.type !== 'hidden') elLocalSched.required = false;
+          elLocalSched.value = '每日 00:00';
+        }
         if (elLocalDisp) { elLocalDisp.required = false; elLocalDisp.value = '磁碟自動覆寫'; }
         if (elLocalEvid) { elLocalEvid.required = false; elLocalEvid.value = '備份系統執行Log'; }
         
@@ -1206,15 +1472,28 @@
     // 控制個別標的內的「異地存放」區塊顯示與必填邏輯
     function toggleOffsite(targetId, show) {
       const section = document.getElementById(`offsiteSection_${targetId}`);
-      if(!section) return;
+      if (!section) return;
       
-      const inputs = section.querySelectorAll('input');
+      const requiredFieldIds = [
+        `offsiteFreqValue_${targetId}`,
+        `offsiteLoc_${targetId}`,
+        `offsiteRet_${targetId}`,
+        `offsiteDispositionMethod_${targetId}`,
+        `offsiteEvidenceRequirements_${targetId}`
+      ];
       if (show) {
         section.style.display = 'block';
-        inputs.forEach(input => input.required = true);
+        requiredFieldIds.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.required = true;
+        });
+        syncTargetSchedule(targetId);
       } else {
         section.style.display = 'none';
-        inputs.forEach(input => input.required = false);
+        requiredFieldIds.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.required = false;
+        });
         const offSched = document.getElementById(`offsiteScheduleTime_${targetId}`);
         const offDisp = document.getElementById(`offsiteDispositionMethod_${targetId}`);
         const offEvid = document.getElementById(`offsiteEvidenceRequirements_${targetId}`);
