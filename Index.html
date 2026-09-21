@@ -221,6 +221,93 @@
   </main>
 
   <script>
+    // --- 排程時間標準語法核心引擎 ---
+    function formatTrackSchedule(unit, time, options = {}) {
+      const u = String(unit || '天').trim();
+      const t = String(time || '00:00').trim();
+      if (u === '版本') return '每次版本發布';
+      if (u === '天') return `每日 ${t}`;
+      if (u === '週') {
+        const w = options.weekday || '日';
+        return `每週${w} ${t}`;
+      }
+      if (u === '個月') {
+        const d = options.day || '1';
+        return d === '月底最後一日' ? `每月月底最後一日 ${t}` : `每月 ${d} 日 ${t}`;
+      }
+      if (u === '年') {
+        const m = options.month || '12';
+        const d = options.day || '31';
+        return d === '月底最後一日' ? `每年 ${m} 月月底最後一日 ${t}` : `每年 ${m} 月 ${d} 日 ${t}`;
+      }
+      return `每日 ${t}`;
+    }
+
+    function composeDualTrackSchedule(options = {}) {
+      const hasDiff = Boolean(options.hasDiff);
+      const fullStr = String(options.fullSchedule || '').trim();
+      const diffStr = hasDiff ? String(options.diffSchedule || '').trim() : '';
+
+      if (hasDiff && fullStr && diffStr) {
+        return `完整:${fullStr} / 差異:${diffStr}`;
+      }
+      if (fullStr) return fullStr;
+      if (diffStr) return diffStr;
+      return '每日 00:00';
+    }
+
+    function parseScheduleString(scheduleStr, defaultUnit = '天') {
+      const raw = String(scheduleStr || '').trim();
+      const result = {
+        isDual: false,
+        full: { time: '00:00', weekday: '日', month: '12', day: '1' },
+        diff: { time: '00:00', weekday: '日', month: '12', day: '1' }
+      };
+
+      if (!raw) return result;
+
+      const dualMatch = raw.match(/^完整:(.*?)\s*\/\s*差異:(.*)$/);
+      if (dualMatch) {
+        result.isDual = true;
+        result.full = parseSingleScheduleSegment_(dualMatch[1].trim(), defaultUnit);
+        result.diff = parseSingleScheduleSegment_(dualMatch[2].trim(), '天');
+        return result;
+      }
+
+      result.full = parseSingleScheduleSegment_(raw, defaultUnit);
+      return result;
+    }
+
+    function parseSingleScheduleSegment_(seg, unit) {
+      const segment = String(seg || '').trim();
+      const parsed = { time: '00:00', weekday: '日', month: '12', day: '1' };
+
+      // 1. 提取時間 HH:mm
+      const timeMatch = segment.match(/(?:^|[^\d])([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?:[^\d]|$)/);
+      if (timeMatch) {
+        const h = timeMatch[1].padStart(2, '0');
+        const m = timeMatch[2].padStart(2, '0');
+        parsed.time = `${h}:${m}`;
+      }
+
+      // 2. 提取星期
+      const weekMatch = segment.match(/每?週([一二三四五六日])/);
+      if (weekMatch) parsed.weekday = weekMatch[1];
+
+      // 3. 提取月份與日期
+      if (segment.includes('月底最後一日')) {
+        parsed.day = '月底最後一日';
+      } else {
+        const dayMatch = segment.match(/每?月\s*([0-3]?\d)\s*日/);
+        if (dayMatch) parsed.day = String(parseInt(dayMatch[1], 10));
+      }
+
+      const yearMatch = segment.match(/每?年\s*([0-1]?\d)\s*月/);
+      if (yearMatch) parsed.month = String(parseInt(yearMatch[1], 10));
+
+      return parsed;
+    }
+
     // --- 狀態管理 (使用 LocalStorage 模擬後端資料庫) ---
     const STORAGE_KEY = 'isms_backup_records';
     let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
