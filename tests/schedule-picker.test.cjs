@@ -21,10 +21,26 @@ function createMockDom() {
         textContent: '',
         innerText: '',
         style: {},
+        checked: false,
+        disabled: false,
+        required: false,
+        reset() {
+          this.value = '';
+          this.checked = false;
+        },
+        querySelector: (sel) => getOrCreate('mock_child_' + sel),
+        querySelectorAll: () => [],
         classList: {
           _classes: new Set(),
           add(c) { this._classes.add(c); },
           remove(c) { this._classes.delete(c); },
+          toggle(c, force) {
+            if (force !== undefined) {
+              if (force) this.add(c); else this.remove(c);
+            } else {
+              if (this.contains(c)) this.remove(c); else this.add(c);
+            }
+          },
           contains(c) { return this._classes.has(c); }
         }
       });
@@ -34,7 +50,26 @@ function createMockDom() {
 
   return {
     elements,
-    getElementById: (id) => elements.get(id) || null,
+    getElementById: (id) => getOrCreate(id),
+    querySelector: (selector) => {
+      const checkedMatch = selector.match(/input\[name="([^"]+)"\]:checked/);
+      if (checkedMatch) {
+        const radioName = checkedMatch[1];
+        const yesEl = getOrCreate(`${radioName}_val_是`);
+        const noEl = getOrCreate(`${radioName}_val_否`);
+        if (yesEl.checked) return yesEl;
+        if (noEl.checked) return noEl;
+        return noEl;
+      }
+      const valMatch = selector.match(/input\[name="([^"]+)"\]\[value="([^"]+)"\]/);
+      if (valMatch) {
+        const el = getOrCreate(`${valMatch[1]}_val_${valMatch[2]}`);
+        el.value = valMatch[2];
+        return el;
+      }
+      return getOrCreate(`mock_qs_${selector}`);
+    },
+    querySelectorAll: () => [],
     register: (id, initial = {}) => {
       const el = getOrCreate(id);
       Object.assign(el, initial);
@@ -48,11 +83,16 @@ function createMockDom() {
 
 const sandbox = {
   localStorage: { getItem: () => null, setItem: () => {} },
-  window: {},
+  window: { scrollTo: () => {} },
   document: {
     addEventListener: () => {},
-    getElementById: (id) => currentMockDom ? currentMockDom.getElementById(id) : null
+    getElementById: (id) => currentMockDom ? currentMockDom.getElementById(id) : null,
+    querySelector: (s) => currentMockDom ? currentMockDom.querySelector(s) : null,
+    querySelectorAll: (s) => currentMockDom ? currentMockDom.querySelectorAll(s) : []
   },
+  alert: () => {},
+  setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms || 0, 5)),
+  clearTimeout,
   console
 };
 vm.createContext(sandbox);
@@ -65,7 +105,10 @@ const {
   renderSchedulePickerTrackHtml,
   updateSchedulePickerUI,
   updateDiffPickerVisibility,
-  syncTargetSchedule
+  syncTargetSchedule,
+  editSystem,
+  resetForm,
+  handleFormSubmit
 } = sandbox;
 
 // --- Task 1 核心語法測試 ---
@@ -295,4 +338,172 @@ test('syncTargetSchedule 正確合成排程字串並更新隱藏 input 與預覽
   assert.equal(logLocalPreview.textContent, '排程設定值: 每日 04:15');
   assert.equal(logOffsiteInput.value, '每月 15 日 05:00');
   assert.equal(logOffsitePreview.textContent, '排程設定值: 每月 15 日 05:00');
+});
+
+// --- Task 3 表單生命週期整合測試 ---
+
+test('表單編輯回填歷史非標準字串之自動解析與正規化', () => {
+  currentMockDom = createMockDom();
+
+  // 模擬載入含有非標準舊字串之歷史系統資料
+  vm.runInContext(`appData = [{
+    id: "sys-legacy",
+    systemName: "歷史舊系統",
+    systemLevel: "關鍵核心系統",
+    managerName: "王小明",
+    targets: [
+      {
+        targetKey: "db",
+        targetName: "資料庫",
+        localDiffValue: "0",
+        localDiffUnit: "天",
+        localFullValue: "1",
+        localFullUnit: "週",
+        localRetention: "3",
+        localLocation: "機房 A 伺服器",
+        localScheduleTime: "凌晨 03:00 執行備份",
+        localDispositionMethod: "磁碟自動覆寫",
+        localEvidenceRequirements: "備份系統執行Log",
+        isOffsite: "是",
+        offsiteFreqValue: "1",
+        offsiteFreqUnit: "天",
+        offsiteLocation: "雲端備份中心",
+        offsiteRetention: "7",
+        offsiteScheduleTime: "2026/01/01 02:30",
+        offsiteDispositionMethod: "磁碟自動覆寫",
+        offsiteEvidenceRequirements: "磁帶消磁簽收單 / 雲端過期報表"
+      },
+      {
+        targetKey: "log",
+        targetName: "系統日誌檔",
+        logRetention: "保存 6 個月",
+        localLocation: "Log 伺服器",
+        localScheduleTime: "每日凌晨 04:15 執行",
+        localDispositionMethod: "磁碟自動覆寫",
+        localEvidenceRequirements: "備份系統執行Log",
+        isOffsite: "否",
+        offsiteFreqValue: "",
+        offsiteFreqUnit: "",
+        offsiteLocation: "",
+        offsiteRetention: "",
+        offsiteScheduleTime: "無",
+        offsiteDispositionMethod: "無",
+        offsiteEvidenceRequirements: "無"
+      }
+    ]
+  }];`, sandbox);
+
+  editSystem('sys-legacy');
+
+  // 1. 一般標的 (db - 週週期) 回填與正規化檢驗
+  assert.equal(currentMockDom.getElementById('fullSchedWeekday_db').value, '日');
+  assert.equal(currentMockDom.getElementById('fullSchedTime_db').value, '03:00');
+  assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '每週日 03:00');
+  assert.equal(currentMockDom.getElementById('localSchedulePreview_db').textContent, '排程設定值: 每週日 03:00');
+
+  // 異地 (db - 天週期)
+  assert.equal(currentMockDom.getElementById('offsiteSchedTime_db').value, '02:30');
+  assert.equal(currentMockDom.getElementById('offsiteScheduleTime_db').value, '每日 02:30');
+  assert.equal(currentMockDom.getElementById('offsiteSchedulePreview_db').textContent, '排程設定值: 每日 02:30');
+
+  // 2. 日誌檔標的 (log - 固定天週期) 回填與正規化檢驗
+  assert.equal(currentMockDom.getElementById('fullSchedTime_log').value, '04:15');
+  assert.equal(currentMockDom.getElementById('localScheduleTime_log').value, '每日 04:15');
+  assert.equal(currentMockDom.getElementById('localSchedulePreview_log').textContent, '排程設定值: 每日 04:15');
+  assert.equal(currentMockDom.getElementById('offsiteScheduleTime_log').value, '無');
+  assert.equal(currentMockDom.getElementById('offsiteSchedulePreview_log').textContent, '排程設定值: 無');
+});
+
+test('表單編輯回填雙軌排程完整回填與狀態同步', () => {
+  currentMockDom = createMockDom();
+
+  vm.runInContext(`appData = [{
+    id: "sys-dual",
+    systemName: "雙軌系統",
+    systemLevel: "關鍵核心系統",
+    managerName: "李大同",
+    targets: [
+      {
+        targetKey: "db",
+        targetName: "資料庫",
+        localDiffValue: "1",
+        localDiffUnit: "天",
+        localFullValue: "1",
+        localFullUnit: "週",
+        localRetention: "4",
+        localLocation: "正式機房",
+        localScheduleTime: "完整:每週日 02:00 / 差異:每日 01:30",
+        localDispositionMethod: "磁碟自動覆寫",
+        localEvidenceRequirements: "備份系統執行Log",
+        isOffsite: "否",
+        offsiteScheduleTime: "無"
+      }
+    ]
+  }];`, sandbox);
+
+  editSystem('sys-dual');
+
+  // 驗證完整軌
+  assert.equal(currentMockDom.getElementById('fullSchedWeekday_db').value, '日');
+  assert.equal(currentMockDom.getElementById('fullSchedTime_db').value, '02:00');
+
+  // 驗證差異軌
+  assert.equal(currentMockDom.getElementById('diffSchedWeekday_db').value, '日');
+  assert.equal(currentMockDom.getElementById('diffSchedTime_db').value, '01:30');
+  assert.equal(currentMockDom.getElementById('diffSchedulePicker_db').classList.contains('hidden'), false);
+
+  // 驗證合成字串
+  assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '完整:每週日 02:00 / 差異:每日 01:30');
+  assert.equal(currentMockDom.getElementById('localSchedulePreview_db').textContent, '排程設定值: 完整:每週日 02:00 / 差異:每日 01:30');
+  assert.equal(currentMockDom.getElementById('offsiteScheduleTime_db').value, '無');
+});
+
+test('表單重置 resetForm 後所有標的與軌道恢復初始預設值', () => {
+  currentMockDom = createMockDom();
+
+  // 先手動填寫污染各元件狀態
+  currentMockDom.getElementById('fullSchedTime_db').value = '15:00';
+  currentMockDom.getElementById('diffSchedTime_db').value = '16:00';
+  currentMockDom.getElementById('diffValue_db').value = '2';
+  currentMockDom.getElementById('localScheduleTime_db').value = '非預設排程';
+  currentMockDom.getElementById('offsiteScheduleTime_db').value = '每週五 03:00';
+  currentMockDom.getElementById('fullSchedTime_log').value = '22:00';
+
+  resetForm();
+
+  // 檢驗 db 控制項恢復預設
+  assert.equal(currentMockDom.getElementById('fullSchedTime_db').value, '00:00');
+  assert.equal(currentMockDom.getElementById('fullSchedWeekday_db').value, '日');
+  assert.equal(currentMockDom.getElementById('fullSchedMonth_db').value, '12');
+  assert.equal(currentMockDom.getElementById('fullSchedDay_db').value, '1');
+  assert.equal(currentMockDom.getElementById('diffSchedTime_db').value, '00:00');
+  assert.equal(currentMockDom.getElementById('diffSchedulePicker_db').classList.contains('hidden'), true);
+  assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '每日 00:00');
+  assert.equal(currentMockDom.getElementById('offsiteScheduleTime_db').value, '無');
+  assert.equal(currentMockDom.getElementById('offsiteSchedulePreview_db').textContent, '排程設定值: 無');
+
+  // 檢驗 log 控制項恢復預設
+  assert.equal(currentMockDom.getElementById('fullSchedTime_log').value, '00:00');
+  assert.equal(currentMockDom.getElementById('localScheduleTime_log').value, '每日 00:00');
+  assert.equal(currentMockDom.getElementById('offsiteScheduleTime_log').value, '無');
+});
+
+test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標的排程字串更新', () => {
+  currentMockDom = createMockDom();
+
+  // 勾選 db 標的
+  currentMockDom.getElementById('check_db').checked = true;
+  currentMockDom.getElementById('fullUnit_db').value = '天';
+  // 模擬使用者直接變更 time input 尚未 trigger 任何 event
+  currentMockDom.getElementById('fullSchedTime_db').value = '05:45';
+  currentMockDom.getElementById('localScheduleTime_db').value = '舊排程未同步';
+
+  let prevented = false;
+  handleFormSubmit({
+    preventDefault: () => { prevented = true; }
+  });
+
+  assert.equal(prevented, true);
+  // handleFormSubmit 內部應呼叫 syncTargetSchedule('db')，使 localScheduleTime_db 更新為最新格式
+  assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '每日 05:45');
 });

@@ -1092,6 +1092,11 @@
               }
             }
             document.getElementById(`logLocalLoc_${tid}`).value = tData.localLocation;
+
+            // 本地日誌排程回填
+            const parsed = parseScheduleString(tData.localScheduleTime, '天');
+            const fullTimeEl = document.getElementById(`fullSchedTime_${tid}`);
+            if (fullTimeEl) fullTimeEl.value = parsed.full.time || '00:00';
           } else {
             document.getElementById(`diffValue_${tid}`).value = tData.localDiffValue === 'N/A' ? '' : tData.localDiffValue;
             document.getElementById(`diffUnit_${tid}`).value = tData.localDiffUnit;
@@ -1102,39 +1107,104 @@
             document.getElementById(`localRet_${tid}`).value = (!isAllRetention && tData.localRetention !== 'N/A') ? tData.localRetention : '';
             toggleLocalRetentionMode(tid);
             document.getElementById(`localLoc_${tid}`).value = tData.localLocation;
+
+            // 一般標的本地排程回填 (完整軌與差異軌)
+            const parsed = parseScheduleString(tData.localScheduleTime, tData.localFullUnit || '天');
+            const fwEl = document.getElementById(`fullSchedWeekday_${tid}`);
+            const fmEl = document.getElementById(`fullSchedMonth_${tid}`);
+            const fdEl = document.getElementById(`fullSchedDay_${tid}`);
+            const ftEl = document.getElementById(`fullSchedTime_${tid}`);
+            if (fwEl) fwEl.value = parsed.full.weekday || '日';
+            if (fmEl) fmEl.value = parsed.full.month || '12';
+            if (fdEl) fdEl.value = parsed.full.day || '1';
+            if (ftEl) ftEl.value = parsed.full.time || '00:00';
+
+            const dwEl = document.getElementById(`diffSchedWeekday_${tid}`);
+            const dmEl = document.getElementById(`diffSchedMonth_${tid}`);
+            const ddEl = document.getElementById(`diffSchedDay_${tid}`);
+            const dtEl = document.getElementById(`diffSchedTime_${tid}`);
+            if (dwEl) dwEl.value = parsed.diff.weekday || '日';
+            if (dmEl) dmEl.value = parsed.diff.month || '12';
+            if (ddEl) ddEl.value = parsed.diff.day || '1';
+            if (dtEl) dtEl.value = parsed.diff.time || '00:00';
+
+            updateSchedulePickerUI(tid, 'full', tData.localFullUnit || '天');
+            updateSchedulePickerUI(tid, 'diff', tData.localDiffUnit || '天');
+            updateDiffPickerVisibility(tid);
+
+            // 避免 updateSchedulePickerUI 覆蓋已解析之月／日
+            if (fmEl && parsed.full.month) fmEl.value = parsed.full.month;
+            if (fdEl && parsed.full.day) fdEl.value = parsed.full.day;
+            if (dmEl && parsed.diff.month) dmEl.value = parsed.diff.month;
+            if (ddEl && parsed.diff.day) ddEl.value = parsed.diff.day;
           }
 
-          // 本地擴充欄位回填
-          const elLocalSched = document.getElementById(`localScheduleTime_${tid}`);
+          // 本地處置方法與佐證回填
           const elLocalDisp = document.getElementById(`localDispositionMethod_${tid}`);
           const elLocalEvid = document.getElementById(`localEvidenceRequirements_${tid}`);
-          if (elLocalSched) elLocalSched.value = tData.localScheduleTime || '每日 00:00';
           if (elLocalDisp) elLocalDisp.value = tData.localDispositionMethod || '磁碟自動覆寫';
           if (elLocalEvid) elLocalEvid.value = tData.localEvidenceRequirements || '備份系統執行Log';
 
           // 異地存放設定
           if (tData.isOffsite === '是') {
-            document.querySelector(`input[name="offsite_${tid}"][value="是"]`).checked = true;
+            const radioYes = document.querySelector(`input[name="offsite_${tid}"][value="是"]`);
+            if (radioYes) radioYes.checked = true;
             toggleOffsite(tid, true);
-            document.getElementById(`offsiteFreqValue_${tid}`).value = tData.offsiteFreqValue;
-            document.getElementById(`offsiteFreqUnit_${tid}`).value = tData.offsiteFreqUnit;
-            document.getElementById(`offsiteLoc_${tid}`).value = tData.offsiteLocation;
-            document.getElementById(`offsiteRet_${tid}`).value = tData.offsiteRetention;
-            const elOffSched = document.getElementById(`offsiteScheduleTime_${tid}`);
+            const freqValEl = document.getElementById(`offsiteFreqValue_${tid}`);
+            const freqUnitEl = document.getElementById(`offsiteFreqUnit_${tid}`);
+            const locEl = document.getElementById(`offsiteLoc_${tid}`);
+            const retEl = document.getElementById(`offsiteRet_${tid}`);
             const elOffDisp = document.getElementById(`offsiteDispositionMethod_${tid}`);
             const elOffEvid = document.getElementById(`offsiteEvidenceRequirements_${tid}`);
-            if (elOffSched) elOffSched.value = tData.offsiteScheduleTime || '每日 00:00';
+
+            if (freqValEl) freqValEl.value = tData.offsiteFreqValue;
+            if (freqUnitEl) freqUnitEl.value = tData.offsiteFreqUnit;
+            if (locEl) locEl.value = tData.offsiteLocation;
+            if (retEl) retEl.value = tData.offsiteRetention;
             if (elOffDisp) elOffDisp.value = tData.offsiteDispositionMethod || '磁碟自動覆寫';
             if (elOffEvid) elOffEvid.value = tData.offsiteEvidenceRequirements || '磁帶消磁簽收單 / 雲端過期報表';
+
+            const offParsed = parseScheduleString(tData.offsiteScheduleTime, tData.offsiteFreqUnit || '天');
+            const owEl = document.getElementById(`offsiteSchedWeekday_${tid}`);
+            const omEl = document.getElementById(`offsiteSchedMonth_${tid}`);
+            const odEl = document.getElementById(`offsiteSchedDay_${tid}`);
+            const otEl = document.getElementById(`offsiteSchedTime_${tid}`);
+            if (owEl) owEl.value = offParsed.full.weekday || '日';
+            if (omEl) omEl.value = offParsed.full.month || '12';
+            if (odEl) odEl.value = offParsed.full.day || '1';
+            if (otEl) otEl.value = offParsed.full.time || '00:00';
+
+            updateSchedulePickerUI(tid, 'offsite', tData.offsiteFreqUnit || '天');
+            if (omEl && offParsed.full.month) omEl.value = offParsed.full.month;
+            if (odEl && offParsed.full.day) odEl.value = offParsed.full.day;
           } else {
-            document.querySelector(`input[name="offsite_${tid}"][value="否"]`).checked = true;
+            const radioNo = document.querySelector(`input[name="offsite_${tid}"][value="否"]`);
+            if (radioNo) radioNo.checked = true;
             toggleOffsite(tid, false);
-            const elOffSched = document.getElementById(`offsiteScheduleTime_${tid}`);
             const elOffDisp = document.getElementById(`offsiteDispositionMethod_${tid}`);
             const elOffEvid = document.getElementById(`offsiteEvidenceRequirements_${tid}`);
-            if (elOffSched) elOffSched.value = '每日 00:00';
             if (elOffDisp) elOffDisp.value = '磁碟自動覆寫';
             if (elOffEvid) elOffEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
+
+            const owEl = document.getElementById(`offsiteSchedWeekday_${tid}`);
+            const omEl = document.getElementById(`offsiteSchedMonth_${tid}`);
+            const odEl = document.getElementById(`offsiteSchedDay_${tid}`);
+            const otEl = document.getElementById(`offsiteSchedTime_${tid}`);
+            if (owEl) owEl.value = '日';
+            if (omEl) omEl.value = '12';
+            if (odEl) odEl.value = '1';
+            if (otEl) otEl.value = '00:00';
+
+            updateSchedulePickerUI(tid, 'offsite', '天');
+          }
+
+          // 同步排程至隱藏 input 與預覽標籤
+          syncTargetSchedule(tid);
+          if (tData.isOffsite !== '是') {
+            const elOffSched = document.getElementById(`offsiteScheduleTime_${tid}`);
+            if (elOffSched) elOffSched.value = '無';
+            const elOffPrev = document.getElementById(`offsiteSchedulePreview_${tid}`);
+            if (elOffPrev) elOffPrev.textContent = '排程設定值: 無';
           }
         }
       });
@@ -1151,14 +1221,47 @@
 
     // --- 重置表單為預設狀態 ---
     function resetForm() {
-      document.getElementById('backupForm').reset();
-      document.getElementById('systemId').value = '';
-      document.getElementById('formTitle').innerText = '新增備份管制設定單';
-      document.getElementById('cancelEditBtn').classList.add('hidden');
-      document.getElementById('submitBtn').innerText = '儲存並送出紀錄';
+      const form = document.getElementById('backupForm');
+      if (form) form.reset();
+      const sysIdEl = document.getElementById('systemId');
+      if (sysIdEl) sysIdEl.value = '';
+      const formTitleEl = document.getElementById('formTitle');
+      if (formTitleEl) formTitleEl.innerText = '新增備份管制設定單';
+      const cancelEditBtn = document.getElementById('cancelEditBtn');
+      if (cancelEditBtn) cancelEditBtn.classList.add('hidden');
+      const submitBtn = document.getElementById('submitBtn');
+      if (submitBtn) submitBtn.innerText = '儲存並送出紀錄';
       
       backupTargets.forEach(t => {
         toggleTarget(t.id);
+        toggleOffsite(t.id, false);
+
+        // 重置各軌控制項數值為標準預設值
+        const tracks = t.id === 'log' ? ['full', 'offsite'] : ['full', 'diff', 'offsite'];
+        tracks.forEach(track => {
+          const timeEl = document.getElementById(`${track}SchedTime_${t.id}`);
+          const weekdayEl = document.getElementById(`${track}SchedWeekday_${t.id}`);
+          const monthEl = document.getElementById(`${track}SchedMonth_${t.id}`);
+          const dayEl = document.getElementById(`${track}SchedDay_${t.id}`);
+          if (timeEl) timeEl.value = '00:00';
+          if (weekdayEl) weekdayEl.value = '日';
+          if (monthEl) monthEl.value = '12';
+          if (dayEl) dayEl.value = '1';
+        });
+
+        // 重設單位 UI 與可見度
+        updateSchedulePickerUI(t.id, 'full', '天');
+        if (t.id !== 'log') {
+          const diffValEl = document.getElementById(`diffValue_${t.id}`);
+          if (diffValEl) diffValEl.value = '';
+          updateSchedulePickerUI(t.id, 'diff', '天');
+          updateDiffPickerVisibility(t.id);
+        }
+        updateSchedulePickerUI(t.id, 'offsite', '天');
+
+        // 同步排程
+        syncTargetSchedule(t.id);
+
         const elLocalSched = document.getElementById(`localScheduleTime_${t.id}`);
         const elLocalDisp = document.getElementById(`localDispositionMethod_${t.id}`);
         const elLocalEvid = document.getElementById(`localEvidenceRequirements_${t.id}`);
@@ -1169,7 +1272,9 @@
         const elOffSched = document.getElementById(`offsiteScheduleTime_${t.id}`);
         const elOffDisp = document.getElementById(`offsiteDispositionMethod_${t.id}`);
         const elOffEvid = document.getElementById(`offsiteEvidenceRequirements_${t.id}`);
-        if (elOffSched) elOffSched.value = '每日 00:00';
+        if (elOffSched) elOffSched.value = '無';
+        const elOffPrev = document.getElementById(`offsiteSchedulePreview_${t.id}`);
+        if (elOffPrev) elOffPrev.textContent = '排程設定值: 無';
         if (elOffDisp) elOffDisp.value = '磁碟自動覆寫';
         if (elOffEvid) elOffEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
       });
@@ -1497,7 +1602,9 @@
         const offSched = document.getElementById(`offsiteScheduleTime_${targetId}`);
         const offDisp = document.getElementById(`offsiteDispositionMethod_${targetId}`);
         const offEvid = document.getElementById(`offsiteEvidenceRequirements_${targetId}`);
-        if (offSched) offSched.value = '每日 00:00';
+        if (offSched) offSched.value = '無';
+        const offPrev = document.getElementById(`offsiteSchedulePreview_${targetId}`);
+        if (offPrev) offPrev.textContent = '排程設定值: 無';
         if (offDisp) offDisp.value = '磁碟自動覆寫';
         if (offEvid) offEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
       }
@@ -1520,6 +1627,11 @@
       if (!validateLocalLocationSelection(activeTargets)) {
         return;
       }
+
+      // 送出前強制執行 syncTargetSchedule 確保所有標的排程字串更新為合法標準格式
+      activeTargets.forEach(t => {
+        syncTargetSchedule(t.id);
+      });
 
       submitBtn.disabled = true;
       submitBtn.innerText = '資料處理中...';
