@@ -43,36 +43,36 @@ function doGet(e) {
 // 動態解析表頭名稱索引（Header-Aware Resolver），支援別名與安全預設值
 function resolveHeaderIndices_(headers) {
   const hList = (headers || []).map(function(h) { return String(h || '').trim(); });
-  function find_(aliases, fallback) {
+  function find_(aliases) {
     for (let i = 0; i < aliases.length; i++) {
       const idx = hList.indexOf(aliases[i]);
       if (idx !== -1) return idx;
     }
-    return fallback;
+    return -1;
   }
   return {
-    timestamp: find_(['時間戳記', 'timestamp'], 0),
-    systemId: find_(['系統ID', '系統代碼', 'sourceSystemId'], 1),
-    systemName: find_(['系統名稱', 'systemName'], 2),
-    systemLevel: find_(['系統等級', 'systemLevel'], 3),
-    targetName: find_(['備份標的', '標的名稱', 'targetName'], 4),
-    managerName: find_(['管理人員', '系統管理人員', '備份負責人', 'managerName'], 5),
-    localFull: find_(['本地_完整週期', '本地完整週期', '完整週期'], 6),
-    localDiff: find_(['本地_差異週期', '本地差異週期', '差異週期'], 7),
-    localRetention: find_(['本地_保留代數', '本地保留代數', '保留代數'], 8),
-    localLocation: find_(['本地_存放地點', '本地存放地點', '存放地點'], 9),
-    localScheduleTime: find_(['本地_排程時間', '本地排程時間'], 10),
-    localDispositionMethod: find_(['本地_處置方法', '本地處置方法'], 11),
-    localEvidenceRequirements: find_(['本地_佐證種類', '本地佐證種類'], 12),
-    isOffsite: find_(['是否異地', '異地備份', '是否異地備份'], 13),
-    offsiteCycle: find_(['異地_週期', '異地週期', '異地備份週期'], 14),
-    offsiteLocation: find_(['異地_地點', '異地存放地點', '異地地點'], 15),
-    offsiteRetention: find_(['異地_保留代數', '異地保留代數'], 16),
-    offsiteScheduleTime: find_(['異地_排程時間', '異地排程時間'], 17),
-    offsiteDispositionMethod: find_(['異地_處置方法', '異地處置方法'], 18),
-    offsiteEvidenceRequirements: find_(['異地_佐證種類', '異地佐證種類'], 19),
-    submissionId: find_(['submission_id', 'submissionId'], 20),
-    targetKey: find_(['target_key', 'targetKey'], 21)
+    timestamp: find_(['時間戳記', 'timestamp']),
+    systemId: find_(['系統ID', '系統代碼', 'sourceSystemId']),
+    systemName: find_(['系統名稱', 'systemName']),
+    systemLevel: find_(['系統等級', 'systemLevel']),
+    targetName: find_(['備份標的', '標的名稱', 'targetName']),
+    managerName: find_(['管理人員', '系統管理人員', '備份負責人', 'managerName']),
+    localFull: find_(['本地_完整週期', '本地完整週期', '完整週期']),
+    localDiff: find_(['本地_差異週期', '本地差異週期', '差異週期', '差異備份週期', '差異']),
+    localRetention: find_(['本地_保留代數', '本地保留代數', '保留代數']),
+    localLocation: find_(['本地_存放地點', '本地存放地點', '存放地點']),
+    localScheduleTime: find_(['本地_排程時間', '本地排程時間']),
+    localDispositionMethod: find_(['本地_處置方法', '本地處置方法']),
+    localEvidenceRequirements: find_(['本地_佐證種類', '本地佐證種類']),
+    isOffsite: find_(['是否異地', '異地備份', '是否異地備份']),
+    offsiteCycle: find_(['異地_週期', '異地週期', '異地備份週期']),
+    offsiteLocation: find_(['異地_地點', '異地存放地點', '異地地點']),
+    offsiteRetention: find_(['異地_保留代數', '異地保留代數']),
+    offsiteScheduleTime: find_(['異地_排程時間', '異地排程時間']),
+    offsiteDispositionMethod: find_(['異地_處置方法', '異地處置方法']),
+    offsiteEvidenceRequirements: find_(['異地_佐證種類', '異地佐證種類']),
+    submissionId: find_(['submission_id', 'submissionId']),
+    targetKey: find_(['target_key', 'targetKey'])
   };
 }
 
@@ -84,7 +84,7 @@ function formatHeaderRow_(sheet, colCount, isHistory) {
   sheet.setFrozenRows(1);
 }
 
-// 零停機平滑資料遷移演算法：偵測並自動重排既有資料列、補齊預設值
+// 零停機平滑資料遷移演算法：偵測並自動重排既有資料列、補齊預設值（僅在 runDataMigration 主動執行）
 function migrateSheetIfNeeded_(sheet, expectedHeaders, isHistory) {
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
@@ -95,23 +95,21 @@ function migrateSheetIfNeeded_(sheet, expectedHeaders, isHistory) {
     return;
   }
 
-  // 嘗試取得第一列表頭比對
+  // 嘗試取得第一列表頭比對：只要前 expectedHeaders.length 欄完全相符，即視為表頭正確，絕不重複遷移
   const checkWidth = Math.max(lastCol, expectedHeaders.length);
   const currentHeaders = sheet.getRange(1, 1, 1, checkWidth).getValues()[0];
-  let isMatch = (lastCol === expectedHeaders.length);
-  if (isMatch) {
-    for (let i = 0; i < expectedHeaders.length; i++) {
-      if (String(currentHeaders[i] || '').trim() !== expectedHeaders[i]) {
-        isMatch = false;
-        break;
-      }
+  let isMatch = true;
+  for (let i = 0; i < expectedHeaders.length; i++) {
+    if (String(currentHeaders[i] || '').trim() !== expectedHeaders[i]) {
+      isMatch = false;
+      break;
     }
   }
 
   // 若表頭已完全一致，直接返回
   if (isMatch) return;
 
-  // 需要自動平滑遷移：讀取現有所有資料列
+  // 需要資料遷移：讀取現有所有資料列
   const existingValues = sheet.getRange(1, 1, lastRow, Math.max(lastCol, 1)).getValues();
   const oldHeaders = existingValues[0].map(function(h) { return String(h || '').trim(); });
 
@@ -152,7 +150,7 @@ function migrateSheetIfNeeded_(sheet, expectedHeaders, isHistory) {
   formatHeaderRow_(sheet, expectedHeaders.length, isHistory);
 }
 
-// 將舊資料列重新投影映射為 22 欄標準業務格式
+// 將舊資料列重新投影映射為 22 欄標準業務格式（安全保護，不盲目覆寫為「無」）
 function projectBusinessRow_(row, getOldVal) {
   const timestamp = getOldVal(row, ['時間戳記', 'timestamp']) || new Date();
   const systemId = getOldVal(row, ['系統ID', '系統代碼', 'sourceSystemId']);
@@ -162,20 +160,33 @@ function projectBusinessRow_(row, getOldVal) {
   const managerName = getOldVal(row, ['管理人員', '系統管理人員', '備份負責人', 'managerName']);
 
   const localFull = getOldVal(row, ['本地_完整週期', '本地完整週期', '完整週期']) || '1 週';
-  const localDiff = getOldVal(row, ['本地_差異週期', '本地差異週期', '差異週期']) || '無';
+  const localDiff = getOldVal(row, ['本地_差異週期', '本地差異週期', '差異週期', '差異備份週期', '差異']) || '無';
   const localRetention = getOldVal(row, ['本地_保留代數', '本地保留代數', '保留代數']) || '4 代';
   const localLocation = getOldVal(row, ['本地_存放地點', '本地存放地點', '存放地點']);
   const localScheduleTime = getOldVal(row, ['本地_排程時間', '本地排程時間']) || '每日 00:00';
   const localDispositionMethod = getOldVal(row, ['本地_處置方法', '本地處置方法']) || '磁碟自動覆寫';
   const localEvidenceRequirements = getOldVal(row, ['本地_佐證種類', '本地佐證種類']) || '備份系統執行Log';
 
-  const isOffsite = getOldVal(row, ['是否異地', '異地備份', '是否異地備份']) || '否';
-  const offsiteCycle = isOffsite === '是' ? (getOldVal(row, ['異地_週期', '異地週期', '異地備份週期']) || '1 週') : '無';
-  const offsiteLocation = isOffsite === '是' ? (getOldVal(row, ['異地_地點', '異地存放地點', '異地地點']) || '') : '無';
-  const offsiteRetention = isOffsite === '是' ? (getOldVal(row, ['異地_保留代數', '異地保留代數']) || '4 代') : '無';
-  const offsiteScheduleTime = isOffsite === '是' ? (getOldVal(row, ['異地_排程時間', '異地排程時間']) || '每日 00:00') : '無';
-  const offsiteDispositionMethod = isOffsite === '是' ? (getOldVal(row, ['異地_處置方法', '異地處置方法']) || '磁碟自動覆寫') : '無';
-  const offsiteEvidenceRequirements = isOffsite === '是' ? (getOldVal(row, ['異地_佐證種類', '異地佐證種類']) || '磁帶消磁簽收單 / 雲端過期報表') : '無';
+  const rawIsOffsite = String(getOldVal(row, ['是否異地', '異地備份', '是否異地備份']) || '').trim();
+  const rawOffsiteCycle = getOldVal(row, ['異地_週期', '異地週期', '異地備份週期']);
+  const rawOffsiteLocation = getOldVal(row, ['異地_地點', '異地存放地點', '異地地點']);
+  const rawOffsiteRetention = getOldVal(row, ['異地_保留代數', '異地保留代數']);
+  const rawOffsiteScheduleTime = getOldVal(row, ['異地_排程時間', '異地排程時間']);
+  const rawOffsiteDispositionMethod = getOldVal(row, ['異地_處置方法', '異地處置方法']);
+  const rawOffsiteEvidenceRequirements = getOldVal(row, ['異地_佐證種類', '異地佐證種類']);
+
+  const hasOffsiteData = (rawOffsiteLocation && rawOffsiteLocation !== '無' && rawOffsiteLocation !== 'N/A') ||
+                         (rawOffsiteCycle && rawOffsiteCycle !== '無' && rawOffsiteCycle !== 'N/A');
+  const isOffsite = (rawIsOffsite === '是' || rawIsOffsite.toLowerCase() === 'true' || rawIsOffsite === '1' || rawIsOffsite.toUpperCase() === 'Y' || hasOffsiteData)
+    ? '是'
+    : (rawIsOffsite || '否');
+
+  const offsiteCycle = isOffsite === '是' ? (rawOffsiteCycle || '1 週') : (rawOffsiteCycle || '無');
+  const offsiteLocation = isOffsite === '是' ? (rawOffsiteLocation || '') : (rawOffsiteLocation || '無');
+  const offsiteRetention = isOffsite === '是' ? (rawOffsiteRetention || '4 代') : (rawOffsiteRetention || '無');
+  const offsiteScheduleTime = isOffsite === '是' ? (rawOffsiteScheduleTime || '每日 00:00') : (rawOffsiteScheduleTime || '無');
+  const offsiteDispositionMethod = isOffsite === '是' ? (rawOffsiteDispositionMethod || '磁碟自動覆寫') : (rawOffsiteDispositionMethod || '無');
+  const offsiteEvidenceRequirements = isOffsite === '是' ? (rawOffsiteEvidenceRequirements || '磁帶消磁簽收單 / 雲端過期報表') : (rawOffsiteEvidenceRequirements || '無');
 
   const submissionId = getOldVal(row, ['submission_id', 'submissionId']) || Utilities.getUuid();
   const targetKey = getOldVal(row, ['target_key', 'targetKey']) || targetNameToKey_(targetName) || 'other';
@@ -190,12 +201,21 @@ function projectBusinessRow_(row, getOldVal) {
   ];
 }
 
-// 檢測並自動填寫主工作表表頭（含平滑資料遷移）
+// 僅在工作表完全為空時初始化表頭，絕不破壞既有資料
+function ensureHeadersExist_(sheet, expectedHeaders, isHistory) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 1) {
+    sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+    formatHeaderRow_(sheet, expectedHeaders.length, isHistory);
+  }
+}
+
+// 檢測並自動填寫主工作表表頭（提供 runDataMigration 主動遷移使用）
 function checkAndSetHeaders(sheet) {
   migrateSheetIfNeeded_(sheet, EXPECTED_HEADERS, false);
 }
 
-// 檢測並自動填寫歷程工作表表頭（含平滑資料遷移）
+// 檢測並自動填寫歷程工作表表頭（提供 runDataMigration 主動遷移使用）
 function checkAndSetHistoryHeaders(sheet) {
   migrateSheetIfNeeded_(sheet, EXPECTED_HISTORY_HEADERS, true);
 }
@@ -260,7 +280,7 @@ function archiveSubmissionRows_(ss, rawRowsData, actionType, operatorEmail) {
   if (!historySheet) {
     historySheet = ss.insertSheet(SHEET_HISTORY_NAME);
   }
-  checkAndSetHistoryHeaders(historySheet);
+  ensureHeadersExist_(historySheet, EXPECTED_HISTORY_HEADERS, true);
 
   const now = new Date();
   const operator = String(operatorEmail || '').trim();
@@ -286,8 +306,8 @@ function submitData(formData) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到指定的工作表，請確認名稱是否為 '" + SHEET_NAME + "'。");
 
-    // 執行表頭檢測與自動填寫/平滑遷移功能
-    checkAndSetHeaders(sheet);
+    // 僅在全新工作表時寫入表頭，保護既有資料列
+    ensureHeadersExist_(sheet, EXPECTED_HEADERS, false);
 
     // 檢查是否有傳入標的陣列
     if (!formData.targets || formData.targets.length === 0) {
@@ -437,8 +457,6 @@ function deleteSubmission(submissionId) {
     const sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到指定的工作表，請確認名稱是否為 '" + SHEET_NAME + "'。");
 
-    checkAndSetHeaders(sheet);
-
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) {
       return { success: false, message: '資料表中無任何資料可刪除。' };
@@ -491,8 +509,6 @@ function getDashboardData() {
 
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到指定的工作表，請確認名稱是否為 '" + SHEET_NAME + "'。");
-
-    checkAndSetHeaders(sheet);
 
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) {
@@ -564,22 +580,42 @@ function getDashboardData() {
 }
 
 function parseTargetFromRow(row, indices, targetKeyFromRow) {
-  const targetName = String(row[indices.targetName] || '').trim();
-  const localFull = splitCycleValue(row[indices.localFull], '週');
-  const localDiff = splitCycleValue(row[indices.localDiff], '天');
-  const localRetention = parseRetentionCount(row[indices.localRetention]);
-  const localLocation = String(row[indices.localLocation] || '').trim();
-  const isOffsite = String(row[indices.isOffsite] || '否').trim() || '否';
-  const offsiteFreq = splitCycleValue(row[indices.offsiteCycle], '週');
-  const offsiteRetention = parseRetentionCount(row[indices.offsiteRetention]);
+  const targetName = (indices.targetName !== -1 && row[indices.targetName]) ? String(row[indices.targetName]).trim() : '';
+  const localFull = splitCycleValue((indices.localFull !== -1 && row[indices.localFull] !== undefined) ? row[indices.localFull] : '', '週');
+  const localDiff = splitCycleValue((indices.localDiff !== -1 && row[indices.localDiff] !== undefined) ? row[indices.localDiff] : '', '天');
+  const localRetention = parseRetentionCount((indices.localRetention !== -1 && row[indices.localRetention] !== undefined) ? row[indices.localRetention] : '');
+  const localLocation = (indices.localLocation !== -1 && row[indices.localLocation] !== undefined) ? String(row[indices.localLocation]).trim() : '';
 
-  const localScheduleTime = String(row[indices.localScheduleTime] || '每日 00:00').trim() || '每日 00:00';
-  const localDispositionMethod = String(row[indices.localDispositionMethod] || '磁碟自動覆寫').trim() || '磁碟自動覆寫';
-  const localEvidenceRequirements = String(row[indices.localEvidenceRequirements] || '備份系統執行Log').trim() || '備份系統執行Log';
+  const rawIsOffsite = (indices.isOffsite !== -1 && row[indices.isOffsite] !== undefined) ? String(row[indices.isOffsite]).trim() : '否';
+  const isOffsite = (rawIsOffsite === '是' || rawIsOffsite.toLowerCase() === 'true' || rawIsOffsite === '1' || rawIsOffsite.toUpperCase() === 'Y') ? '是' : (rawIsOffsite || '否');
 
-  const offsiteScheduleTime = isOffsite === '是' ? (String(row[indices.offsiteScheduleTime] || '每日 00:00').trim() || '每日 00:00') : '無';
-  const offsiteDispositionMethod = isOffsite === '是' ? (String(row[indices.offsiteDispositionMethod] || '磁碟自動覆寫').trim() || '磁碟自動覆寫') : '無';
-  const offsiteEvidenceRequirements = isOffsite === '是' ? (String(row[indices.offsiteEvidenceRequirements] || '磁帶消磁簽收單 / 雲端過期報表').trim() || '磁帶消磁簽收單 / 雲端過期報表') : '無';
+  const offsiteFreq = splitCycleValue((indices.offsiteCycle !== -1 && row[indices.offsiteCycle] !== undefined) ? row[indices.offsiteCycle] : '', '週');
+  const offsiteRetention = parseRetentionCount((indices.offsiteRetention !== -1 && row[indices.offsiteRetention] !== undefined) ? row[indices.offsiteRetention] : '');
+
+  const localScheduleTime = (indices.localScheduleTime !== -1 && row[indices.localScheduleTime] !== undefined && String(row[indices.localScheduleTime]).trim() !== '')
+    ? String(row[indices.localScheduleTime]).trim()
+    : '每日 00:00';
+  const localDispositionMethod = (indices.localDispositionMethod !== -1 && row[indices.localDispositionMethod] !== undefined && String(row[indices.localDispositionMethod]).trim() !== '')
+    ? String(row[indices.localDispositionMethod]).trim()
+    : '磁碟自動覆寫';
+  const localEvidenceRequirements = (indices.localEvidenceRequirements !== -1 && row[indices.localEvidenceRequirements] !== undefined && String(row[indices.localEvidenceRequirements]).trim() !== '')
+    ? String(row[indices.localEvidenceRequirements]).trim()
+    : '備份系統執行Log';
+
+  const offsiteLocationVal = (indices.offsiteLocation !== -1 && row[indices.offsiteLocation] !== undefined) ? String(row[indices.offsiteLocation]).trim() : '';
+  const offsiteScheduleTimeVal = (indices.offsiteScheduleTime !== -1 && row[indices.offsiteScheduleTime] !== undefined && String(row[indices.offsiteScheduleTime]).trim() !== '')
+    ? String(row[indices.offsiteScheduleTime]).trim()
+    : '每日 00:00';
+  const offsiteDispositionMethodVal = (indices.offsiteDispositionMethod !== -1 && row[indices.offsiteDispositionMethod] !== undefined && String(row[indices.offsiteDispositionMethod]).trim() !== '')
+    ? String(row[indices.offsiteDispositionMethod]).trim()
+    : '磁碟自動覆寫';
+  const offsiteEvidenceRequirementsVal = (indices.offsiteEvidenceRequirements !== -1 && row[indices.offsiteEvidenceRequirements] !== undefined && String(row[indices.offsiteEvidenceRequirements]).trim() !== '')
+    ? String(row[indices.offsiteEvidenceRequirements]).trim()
+    : '磁帶消磁簽收單 / 雲端過期報表';
+
+  const offsiteScheduleTime = isOffsite === '是' ? offsiteScheduleTimeVal : '無';
+  const offsiteDispositionMethod = isOffsite === '是' ? offsiteDispositionMethodVal : '無';
+  const offsiteEvidenceRequirements = isOffsite === '是' ? offsiteEvidenceRequirementsVal : '無';
 
   const target = {
     targetKey: normalizeTargetKey_(targetKeyFromRow) || targetNameToKey_(targetName),
@@ -597,7 +633,7 @@ function parseTargetFromRow(row, indices, targetKeyFromRow) {
     isOffsite: isOffsite,
     offsiteFreqValue: offsiteFreq.value,
     offsiteFreqUnit: offsiteFreq.unit,
-    offsiteLocation: isOffsite === '是' ? String(row[indices.offsiteLocation] || '').trim() : '',
+    offsiteLocation: isOffsite === '是' ? offsiteLocationVal : '',
     offsiteRetention: isOffsite === '是' ? offsiteRetention : '',
     offsiteScheduleTime: offsiteScheduleTime,
     offsiteDispositionMethod: offsiteDispositionMethod,
@@ -611,7 +647,7 @@ function parseTargetFromRow(row, indices, targetKeyFromRow) {
     target.localFullValue = 'N/A';
     target.localFullUnit = '';
     target.localRetention = 'N/A';
-    target.logRetention = String(row[indices.localRetention] || '').trim();
+    target.logRetention = (indices.localRetention !== -1 && row[indices.localRetention] !== undefined) ? String(row[indices.localRetention]).trim() : '';
   }
 
   return target;
@@ -713,20 +749,25 @@ function isRowBelongsToSubmission_(row, submissionId, indices) {
   const id = String(submissionId || '').trim();
   if (!id) return false;
 
-  const subCol = (indices && indices.submissionId !== undefined) ? indices.submissionId : 20;
-  const rowSubmissionId = String(row[subCol] || '').trim();
+  const subCol = (indices && indices.submissionId !== undefined && indices.submissionId !== -1) ? indices.submissionId : -1;
+  const rowSubmissionId = subCol !== -1 ? String(row[subCol] || '').trim() : '';
   if (rowSubmissionId && rowSubmissionId === id) {
     return true;
   }
 
   if (!rowSubmissionId) {
-    const tsCol = (indices && indices.timestamp !== undefined) ? indices.timestamp : 0;
-    const nameCol = (indices && indices.systemName !== undefined) ? indices.systemName : 2;
-    const levelCol = (indices && indices.systemLevel !== undefined) ? indices.systemLevel : 3;
-    const mgrCol = (indices && indices.managerName !== undefined) ? indices.managerName : 5;
+    const tsCol = (indices && indices.timestamp !== undefined && indices.timestamp !== -1) ? indices.timestamp : 0;
+    const nameCol = (indices && indices.systemName !== undefined && indices.systemName !== -1) ? indices.systemName : 2;
+    const levelCol = (indices && indices.systemLevel !== undefined && indices.systemLevel !== -1) ? indices.systemLevel : 3;
+    const mgrCol = (indices && indices.managerName !== undefined && indices.managerName !== -1) ? indices.managerName : 5;
 
-    const timestamp = row[tsCol] ? new Date(row[tsCol]) : new Date(0);
-    const legacyId = buildLegacySubmissionKey_(timestamp, row[nameCol], row[levelCol], row[mgrCol]);
+    const timestamp = (tsCol !== -1 && row[tsCol]) ? new Date(row[tsCol]) : new Date(0);
+    const legacyId = buildLegacySubmissionKey_(
+      timestamp,
+      nameCol !== -1 ? row[nameCol] : '',
+      levelCol !== -1 ? row[levelCol] : '',
+      mgrCol !== -1 ? row[mgrCol] : ''
+    );
     return legacyId === id;
   }
 
