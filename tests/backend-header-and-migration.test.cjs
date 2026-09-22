@@ -26,6 +26,7 @@ exports.normalizeTargetKey_ = normalizeTargetKey_;
 exports.targetNameToKey_ = targetNameToKey_;
 exports.projectBusinessRow_ = projectBusinessRow_;
 exports.migrateSheetIfNeeded_ = migrateSheetIfNeeded_;
+exports.backfillMissingTechnicalKeys = backfillMissingTechnicalKeys;
 `;
 
 const mod = {};
@@ -166,4 +167,68 @@ test('migrateSheetIfNeeded_ 在 26 欄工作表（A~Z）但前 22 欄表頭正�
 
   mod.migrateSheetIfNeeded_(mockSheet, mod.EXPECTED_HEADERS, false);
   assert.equal(clearCalled, false, '表頭吻合時絕不可呼叫 clearContents');
+});
+
+test('backfillMissingTechnicalKeys 正確為同一系統補齊相同 UUID 並依標的名稱推導 target_key', () => {
+  let writtenValues = null;
+  let copiedBackupName = null;
+
+  const mockRows = [
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '資料庫', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '系統日誌檔', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['2026/9/20 12:00:00', 'SYS-02', 'LIMS系統', '一般系統', '原始碼', '李四', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'existing-uuid-002', 'source']
+  ];
+
+  const mockSheet = {
+    getLastRow: () => 4,
+    getLastColumn: () => 22,
+    getRange: (r, c, numR, numC) => {
+      if (r === 1) {
+        return { getValues: () => [mod.EXPECTED_HEADERS] };
+      }
+      return {
+        getValues: () => mockRows,
+        setValues: (vals) => { writtenValues = vals; }
+      };
+    },
+    copyTo: () => ({
+      setName: (name) => { copiedBackupName = name; }
+    })
+  };
+
+  const mockSs = {
+    getSheetByName: (name) => (name === '備份管制' ? mockSheet : null)
+  };
+
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => mockSs,
+    getUi: () => ({ alert: () => {} })
+  };
+
+  const Session = {
+    getScriptTimeZone: () => 'GMT+8'
+  };
+
+  const Utilities = {
+    getUuid: (() => {
+      let count = 1;
+      return () => 'mock-uuid-' + (count++);
+    })(),
+    formatDate: () => '20260922_120000'
+  };
+
+  const fnSrc = `
+    ${codeJsContent}
+    return backfillMissingTechnicalKeys();
+  `;
+  const runner = new Function('SpreadsheetApp', 'Session', 'Utilities', 'console', fnSrc);
+  const result = runner(SpreadsheetApp, Session, Utilities, console);
+
+  assert.ok(copiedBackupName.includes('備份管制_backup_'), '必須在寫入前建立備份快照分頁');
+  assert.ok(writtenValues !== null, '必須寫回補齊後的數值');
+  assert.equal(writtenValues[0][20], writtenValues[1][20], '同一系統的多個標的必須分配同一個 UUID');
+  assert.equal(writtenValues[0][21], 'db', '資料庫標的應補齊為 db');
+  assert.equal(writtenValues[1][21], 'log', '系統日誌檔標的應補齊為 log');
+  assert.equal(writtenValues[2][20], 'existing-uuid-002', '既有 UUID 必須保留');
+  assert.equal(writtenValues[2][21], 'source', '既有 target_key 必須保留');
 });

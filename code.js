@@ -272,6 +272,94 @@ function runDataMigration() {
   return summary;
 }
 
+/**
+ * 安全批次補齊技術欄位工具（僅填補空白之 submission_id 與 target_key，絕不更動業務資料）
+ * 1. 僅檢查並補齊主表「備份管制」中第 21 欄 (submission_id) 與第 22 欄 (target_key)
+ * 2. 相同系統之歷史多個標的列自動關聯並共享同一組 UUID
+ * 3. 補齊前自動建立完整備份快照分頁，100% 可復原
+ */
+function backfillMissingTechnicalKeys() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) throw new Error("找不到工作表「" + SHEET_NAME + "」。");
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    const msg = '工作表中無資料列需補齊。';
+    console.log(msg);
+    return msg;
+  }
+
+  const headerValues = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const indices = resolveHeaderIndices_(headerValues);
+  if (indices.submissionId === -1 || indices.targetKey === -1) {
+    throw new Error("工作表表頭缺少「submission_id」或「target_key」欄位，請先確認表頭結構。");
+  }
+
+  // 自動建立快照備份
+  const timeStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+  const backupName = `${SHEET_NAME}_backup_${timeStr}`;
+  sheet.copyTo(ss).setName(backupName);
+
+  const colCount = Math.max(sheet.getLastColumn(), EXPECTED_HEADERS.length);
+  const range = sheet.getRange(2, 1, lastRow - 1, colCount);
+  const values = range.getValues();
+
+  const legacyToUuidMap = new Map();
+  let filledSubCount = 0;
+  let filledKeyCount = 0;
+
+  // 第一輪：收集已有 UUID 的 legacyKey
+  values.forEach(function(row) {
+    const existingSubId = String(row[indices.submissionId] || '').trim();
+    if (existingSubId) {
+      const ts = row[indices.timestamp] ? new Date(row[indices.timestamp]) : new Date(0);
+      const legacyKey = buildLegacySubmissionKey_(ts, row[indices.systemName], row[indices.systemLevel], row[indices.managerName]);
+      if (!legacyToUuidMap.has(legacyKey)) {
+        legacyToUuidMap.set(legacyKey, existingSubId);
+      }
+    }
+  });
+
+  // 第二輪：逐列檢查並填補缺失的技術欄位
+  const updatedValues = values.map(function(row) {
+    const newRow = row.slice();
+    let currentSubId = String(newRow[indices.submissionId] || '').trim();
+    let currentTargetKey = normalizeTargetKey_(newRow[indices.targetKey]);
+
+    if (!currentSubId) {
+      const ts = newRow[indices.timestamp] ? new Date(newRow[indices.timestamp]) : new Date(0);
+      const legacyKey = buildLegacySubmissionKey_(ts, newRow[indices.systemName], newRow[indices.systemLevel], newRow[indices.managerName]);
+      if (!legacyToUuidMap.has(legacyKey)) {
+        legacyToUuidMap.set(legacyKey, Utilities.getUuid());
+      }
+      newRow[indices.submissionId] = legacyToUuidMap.get(legacyKey);
+      filledSubCount++;
+    }
+
+    if (!currentTargetKey) {
+      const targetName = String(newRow[indices.targetName] || '').trim();
+      const derivedKey = targetNameToKey_(targetName) || 'other';
+      newRow[indices.targetKey] = derivedKey;
+      filledKeyCount++;
+    }
+
+    return newRow;
+  });
+
+  // 僅在有補齊內容時批次寫回
+  if (filledSubCount > 0 || filledKeyCount > 0) {
+    range.setValues(updatedValues);
+  }
+
+  const summary = `【技術欄位補齊完成】\n• 已建立安全備份分頁：${backupName}\n• 總處理資料列：${lastRow - 1} 筆\n• 補齊 submission_id：${filledSubCount} 筆\n• 補齊 target_key：${filledKeyCount} 筆`;
+  console.log(summary);
+  try {
+    SpreadsheetApp.getUi().alert('技術欄位補齊完成', summary, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+  return summary;
+}
+
 // 將異動前列快照寫入歷程表
 function archiveSubmissionRows_(ss, rawRowsData, actionType, operatorEmail) {
   if (!rawRowsData || rawRowsData.length === 0) return;
