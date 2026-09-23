@@ -1,3 +1,4 @@
 .clasp.json
 env.js
 docs/
+tests/

@@ -25,6 +25,35 @@ const EXPECTED_HISTORY_HEADERS = [
   'submission_id', 'target_key'
 ];
 
+// 嚴格驗證工作表欄位契約；一般資料 API 僅驗證，不在讀寫途中自動遷移。
+function assertSheetSchema_(sheet, expectedHeaders, sheetLabel) {
+  if (!sheet) {
+    throw new Error('找不到工作表「' + String(sheetLabel || '') + '」。');
+  }
+
+  const expected = expectedHeaders || [];
+  const actualColumnCount = sheet.getLastColumn();
+  const label = String(sheetLabel || '未命名工作表');
+  if (actualColumnCount !== expected.length) {
+    throw new Error(
+      '工作表「' + label + '」欄位結構不符：預期 ' + expected.length +
+      ' 欄，實際 ' + actualColumnCount + ' 欄。請先執行 runDataMigration。'
+    );
+  }
+
+  const actualHeaders = sheet.getRange(1, 1, 1, expected.length).getValues()[0];
+  for (let i = 0; i < expected.length; i++) {
+    const actual = String(actualHeaders[i] || '').trim();
+    if (actual !== expected[i]) {
+      throw new Error(
+        '工作表「' + label + '」欄位結構不符：第 ' + (i + 1) +
+        ' 欄預期為「' + expected[i] + '」，實際為「' + actual +
+        '」。請先執行 runDataMigration。'
+      );
+    }
+  }
+}
+
 // 1. 輸出前端 HTML 網頁
 function doGet(e) {
   const permission = checkAppPermission_();
@@ -104,6 +133,19 @@ function migrateSheetIfNeeded_(sheet, expectedHeaders, isHistory) {
       isMatch = false;
       break;
     }
+  }
+
+  // W 欄後若只是空白格線可安全忽略；若存在有效內容，必須透過遷移投影回標準欄數。
+  if (isMatch && lastCol > expectedHeaders.length) {
+    const trailingValues = sheet
+      .getRange(1, expectedHeaders.length + 1, lastRow, lastCol - expectedHeaders.length)
+      .getValues();
+    const hasTrailingContent = trailingValues.some(function(row) {
+      return row.some(function(cell) {
+        return cell !== '' && cell !== null && cell !== undefined;
+      });
+    });
+    if (hasTrailingContent) isMatch = false;
   }
 
   // 若表頭已完全一致，直接返回
@@ -291,6 +333,7 @@ function backfillMissingTechnicalKeys() {
   }
 
   const headerValues = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  assertSheetSchema_(sheet, EXPECTED_HEADERS, SHEET_NAME);
   const indices = resolveHeaderIndices_(headerValues);
   if (indices.submissionId === -1 || indices.targetKey === -1) {
     throw new Error("工作表表頭缺少「submission_id」或「target_key」欄位，請先確認表頭結構。");
@@ -349,7 +392,10 @@ function backfillMissingTechnicalKeys() {
 
   // 僅在有補齊內容時批次寫回
   if (filledSubCount > 0 || filledKeyCount > 0) {
-    range.setValues(updatedValues);
+    const technicalValues = updatedValues.map(function(row) {
+      return [row[indices.submissionId] || '', row[indices.targetKey] || ''];
+    });
+    sheet.getRange(2, indices.submissionId + 1, lastRow - 1, 2).setValues(technicalValues);
   }
 
   const summary = `【技術欄位補齊完成】\n• 已建立安全備份分頁：${backupName}\n• 總處理資料列：${lastRow - 1} 筆\n• 補齊 submission_id：${filledSubCount} 筆\n• 補齊 target_key：${filledKeyCount} 筆`;
@@ -369,13 +415,16 @@ function archiveSubmissionRows_(ss, rawRowsData, actionType, operatorEmail) {
     historySheet = ss.insertSheet(SHEET_HISTORY_NAME);
   }
   ensureHeadersExist_(historySheet, EXPECTED_HISTORY_HEADERS, true);
+  assertSheetSchema_(historySheet, EXPECTED_HISTORY_HEADERS, SHEET_HISTORY_NAME);
 
   const now = new Date();
   const operator = String(operatorEmail || '').trim();
   const action = String(actionType || '異動封存').trim();
 
   const historyRows = rawRowsData.map(function(row) {
-    return [now, operator, action].concat(row);
+    const snapshot = (row || []).slice(0, EXPECTED_HEADERS.length);
+    while (snapshot.length < EXPECTED_HEADERS.length) snapshot.push('');
+    return [now, operator, action].concat(snapshot);
   });
 
   let startRow = historySheet.getLastRow() + 1;
@@ -396,6 +445,7 @@ function submitData(formData) {
 
     // 僅在全新工作表時寫入表頭，保護既有資料列
     ensureHeadersExist_(sheet, EXPECTED_HEADERS, false);
+    assertSheetSchema_(sheet, EXPECTED_HEADERS, SHEET_NAME);
 
     // 檢查是否有傳入標的陣列
     if (!formData.targets || formData.targets.length === 0) {
@@ -544,6 +594,7 @@ function deleteSubmission(submissionId) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到指定的工作表，請確認名稱是否為 '" + SHEET_NAME + "'。");
+    assertSheetSchema_(sheet, EXPECTED_HEADERS, SHEET_NAME);
 
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) {
@@ -778,6 +829,7 @@ function getDashboardData() {
 
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到指定的工作表，請確認名稱是否為 '" + SHEET_NAME + "'。");
+    assertSheetSchema_(sheet, EXPECTED_HEADERS, SHEET_NAME);
 
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) {
@@ -1177,6 +1229,7 @@ function generateBackupControlDocument() {
     if (!sourceSheet) {
       return { success: false, message: "找不到資料來源工作表（備份管制）。" };
     }
+    assertSheetSchema_(sourceSheet, EXPECTED_HEADERS, SHEET_NAME);
 
     const templateFile = DriveApp.getFileById(String(FORM_TEMPLATE_DOC_ID).trim());
     const outputFolderId = String(FORM_OUTPUT_FOLDER_ID).trim();
@@ -1208,7 +1261,6 @@ function generateBackupControlDocument() {
       return { success: true, message: '文件已生成（目前無資料列）。', url: doc.getUrl(), fileId: copiedFile.getId(), recordNo: recordNo };
     }
 
-    checkAndSetHeaders(sourceSheet);
     const sourceHeaders = sourceSheet.getRange(1, 1, 1, Math.max(sourceSheet.getLastColumn(), 1)).getValues()[0];
     const indices = resolveHeaderIndices_(sourceHeaders);
     const values = sourceSheet.getRange(2, 1, lastRow - 1, sourceSheet.getLastColumn()).getValues();

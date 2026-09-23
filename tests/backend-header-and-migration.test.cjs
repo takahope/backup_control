@@ -31,6 +31,7 @@ exports.ensureTechnicalHeadersExist_ = ensureTechnicalHeadersExist_;
 exports.autoBackfillTechnicalKeysIfNeeded_ = autoBackfillTechnicalKeysIfNeeded_;
 exports.ensureSheetColumnsExist_ = ensureSheetColumnsExist_;
 exports.runAutoBackfillNow = runAutoBackfillNow;
+exports.archiveSubmissionRows_ = archiveSubmissionRows_;
 `;
 
 const mod = {};
@@ -150,15 +151,17 @@ test('projectBusinessRow_ 安全投影：異地地點有資料或布林值時絕
 
 test('migrateSheetIfNeeded_ 在 26 欄工作表（A~Z）但前 22 欄表頭正確時，絕不可清空工作表', () => {
   let clearCalled = false;
+  const sheetRows = [
+    [...mod.EXPECTED_HEADERS, '', '', '', ''],
+    Array(26).fill('')
+  ];
   const mockSheet = {
     getLastRow: () => 10,
     getLastColumn: () => 26, // 預設 26 欄
     getRange: (r, c, numR, numC) => ({
-      getValues: () => {
-        // 第一列：前 22 欄正確，後 4 欄為空
-        const row1 = [...mod.EXPECTED_HEADERS, '', '', '', ''];
-        return [row1];
-      },
+      getValues: () => sheetRows
+        .slice(r - 1, r - 1 + Math.min(numR, sheetRows.length))
+        .map(row => row.slice(c - 1, c - 1 + numC)),
       setValues: () => {},
       setFontWeight: () => {},
       setBackground: () => {}
@@ -171,6 +174,35 @@ test('migrateSheetIfNeeded_ 在 26 欄工作表（A~Z）但前 22 欄表頭正�
 
   mod.migrateSheetIfNeeded_(mockSheet, mod.EXPECTED_HEADERS, false);
   assert.equal(clearCalled, false, '表頭吻合時絕不可呼叫 clearContents');
+});
+
+test('migrateSheetIfNeeded_ 必須移除 V 欄後的有效殘留資料並重建 22 欄契約', () => {
+  let clearCalled = false;
+  let written = null;
+  const dataRow = Array.from({ length: 22 }, (_, i) => `value-${i + 1}`).concat('W-殘留');
+  const sheetRows = [[...mod.EXPECTED_HEADERS, '舊欄位'], dataRow];
+  const mockSheet = {
+    getLastRow: () => 2,
+    getLastColumn: () => 23,
+    getRange: (r, c, numR, numC) => ({
+      getValues: () => sheetRows
+        .slice(r - 1, r - 1 + numR)
+        .map(row => row.slice(c - 1, c - 1 + numC)),
+      setValues: (values) => { written = { r, c, numR, numC, values }; },
+      setFontWeight: () => {},
+      setBackground: () => {}
+    }),
+    clearContents: () => { clearCalled = true; },
+    setFrozenRows: () => {}
+  };
+
+  mod.migrateSheetIfNeeded_(mockSheet, mod.EXPECTED_HEADERS, false);
+
+  assert.equal(clearCalled, true);
+  assert.equal(written.numC, 22);
+  assert.deepEqual(written.values[0], mod.EXPECTED_HEADERS);
+  assert.equal(written.values[1].length, 22);
+  assert.equal(written.values[1].includes('W-殘留'), false);
 });
 
 test('backfillMissingTechnicalKeys 正確為同一系統補齊相同 UUID 並依標的名稱推導 target_key', () => {
@@ -230,11 +262,11 @@ test('backfillMissingTechnicalKeys 正確為同一系統補齊相同 UUID 並依
 
   assert.ok(copiedBackupName.includes('備份管制_backup_'), '必須在寫入前建立備份快照分頁');
   assert.ok(writtenValues !== null, '必須寫回補齊後的數值');
-  assert.equal(writtenValues[0][20], writtenValues[1][20], '同一系統的多個標的必須分配同一個 UUID');
-  assert.equal(writtenValues[0][21], 'db', '資料庫標的應補齊為 db');
-  assert.equal(writtenValues[1][21], 'log', '系統日誌檔標的應補齊為 log');
-  assert.equal(writtenValues[2][20], 'existing-uuid-002', '既有 UUID 必須保留');
-  assert.equal(writtenValues[2][21], 'source', '既有 target_key 必須保留');
+  assert.equal(writtenValues[0][0], writtenValues[1][0], '同一系統的多個標的必須分配同一個 UUID');
+  assert.equal(writtenValues[0][1], 'db', '資料庫標的應補齊為 db');
+  assert.equal(writtenValues[1][1], 'log', '系統日誌檔標的應補齊為 log');
+  assert.equal(writtenValues[2][0], 'existing-uuid-002', '既有 UUID 必須保留');
+  assert.equal(writtenValues[2][1], 'source', '既有 target_key 必須保留');
 });
 
 test('autoBackfillTechnicalKeysIfNeeded_ 命中 Fast-path 時絕不執行任何寫入操作', () => {
@@ -392,3 +424,187 @@ test('ensureSheetColumnsExist_ 在格線不足 22 欄時正確擴展欄位，超
   assert.equal(insertedBig, null, '欄數已達 26 欄時絕不可重複插入欄位');
 });
 
+test('submitData 遇到非標準 A:V 表頭時必須拒絕寫入並提示執行遷移', () => {
+  let writeCalled = false;
+  const malformedHeaders = [...mod.EXPECTED_HEADERS];
+  [malformedHeaders[13], malformedHeaders[14]] = [malformedHeaders[14], malformedHeaders[13]];
+
+  const mockSheet = {
+    getLastRow: () => 2,
+    getLastColumn: () => 22,
+    getRange: (row) => ({
+      getValues: () => row === 1 ? [malformedHeaders] : [[]],
+      setValues: () => { writeCalled = true; }
+    }),
+    deleteRow: () => { writeCalled = true; }
+  };
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({
+      getSheetByName: (name) => name === '備份管制' ? mockSheet : null
+    })
+  };
+  const Utilities = { getUuid: () => 'new-uuid' };
+  const Session = { getActiveUser: () => ({ getEmail: () => 'admin@example.com' }) };
+  const runner = new Function('SpreadsheetApp', 'Utilities', 'Session', 'console', `
+    ${codeJsContent}
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return submitData({
+      systemName: 'SYS-01 - 測試系統',
+      systemLevel: '一般系統',
+      managerName: '王小明',
+      targets: [{
+        targetKey: 'db', targetName: '資料庫',
+        localFullValue: '1', localFullUnit: '週',
+        localDiffValue: '1', localDiffUnit: '天',
+        localRetention: '4', localLocation: 'NAS',
+        isOffsite: '否'
+      }]
+    });
+  `);
+
+  const result = runner(SpreadsheetApp, Utilities, Session, console);
+  assert.equal(result.success, false);
+  assert.match(result.message, /runDataMigration/);
+  assert.equal(writeCalled, false, 'schema 不符時不得覆寫、追加或刪除任何資料列');
+});
+
+test('backfillMissingTechnicalKeys 只能寫入 U:V，不得重寫 A:T 業務欄位', () => {
+  const writes = [];
+  const sourceRows = [
+    ['2026/9/23 10:00:00', 'SYS-01', '測試系統', '一般系統', '資料庫', '王小明', '=FORMULA()', '', '', '', '', '', '', '否', '', '', '', '', '', '', '', '']
+  ];
+  const mockSheet = {
+    getLastRow: () => 2,
+    getLastColumn: () => 22,
+    getRange: (row, col, numRows, numCols) => ({
+      getValues: () => row === 1 ? [mod.EXPECTED_HEADERS] : sourceRows,
+      setValues: (values) => writes.push({ row, col, numRows, numCols, values })
+    }),
+    copyTo: () => ({ setName: () => {} })
+  };
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({ getSheetByName: () => mockSheet }),
+    getUi: () => ({ alert: () => {} })
+  };
+  const Session = { getScriptTimeZone: () => 'Asia/Taipei' };
+  const Utilities = {
+    getUuid: () => 'generated-uuid',
+    formatDate: () => '20260923_100000'
+  };
+  const runner = new Function('SpreadsheetApp', 'Session', 'Utilities', 'console', `
+    ${codeJsContent}
+    return backfillMissingTechnicalKeys();
+  `);
+
+  runner(SpreadsheetApp, Session, Utilities, console);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(
+    { row: writes[0].row, col: writes[0].col, numRows: writes[0].numRows, numCols: writes[0].numCols },
+    { row: 2, col: 21, numRows: 1, numCols: 2 }
+  );
+  assert.deepEqual(writes[0].values, [['generated-uuid', 'db']]);
+});
+
+test('archiveSubmissionRows_ 永遠只封存 3 個稽核欄位加 A:V 快照', () => {
+  let archived = null;
+  const historySheet = {
+    getLastRow: () => 1,
+    getLastColumn: () => 25,
+    getRange: (row, col, numRows, numCols) => ({
+      getValues: () => [mod.EXPECTED_HISTORY_HEADERS],
+      setValues: (values) => { archived = { row, col, numRows, numCols, values }; }
+    })
+  };
+  const ss = { getSheetByName: () => historySheet };
+  const sourceRowWithTrailingData = [...Array.from({ length: 22 }, (_, i) => `col-${i + 1}`), 'W-殘留', 'X-殘留'];
+
+  mod.archiveSubmissionRows_(ss, [sourceRowWithTrailingData], '更新前封存', 'admin@example.com');
+
+  assert.equal(archived.numCols, 25);
+  assert.equal(archived.values[0].length, 25);
+  assert.deepEqual(archived.values[0].slice(3), sourceRowWithTrailingData.slice(0, 22));
+});
+
+test('getDashboardData 即使只有表頭也必須拒絕非標準 A:V schema', () => {
+  const malformedHeaders = [...mod.EXPECTED_HEADERS];
+  malformedHeaders[21] = '錯誤技術欄';
+  const mockSheet = {
+    getLastRow: () => 1,
+    getLastColumn: () => 22,
+    getRange: () => ({ getValues: () => [malformedHeaders] })
+  };
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({ getSheetByName: () => mockSheet })
+  };
+  const runner = new Function('SpreadsheetApp', 'console', `
+    ${codeJsContent}
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return getDashboardData();
+  `);
+
+  const result = runner(SpreadsheetApp, console);
+  assert.equal(result.success, false);
+  assert.match(result.message, /runDataMigration/);
+});
+
+test('deleteSubmission 遇到非標準 A:V schema 時不得刪除資料', () => {
+  let deleteCalled = false;
+  const malformedHeaders = [...mod.EXPECTED_HEADERS];
+  [malformedHeaders[20], malformedHeaders[21]] = [malformedHeaders[21], malformedHeaders[20]];
+  const mockSheet = {
+    getLastRow: () => 2,
+    getLastColumn: () => 22,
+    getRange: (row) => ({ getValues: () => row === 1 ? [malformedHeaders] : [[]] }),
+    deleteRow: () => { deleteCalled = true; }
+  };
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({ getSheetByName: () => mockSheet })
+  };
+  const runner = new Function('SpreadsheetApp', 'console', `
+    ${codeJsContent}
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return deleteSubmission('submission-1');
+  `);
+
+  const result = runner(SpreadsheetApp, console);
+  assert.equal(result.success, false);
+  assert.match(result.message, /runDataMigration/);
+  assert.equal(deleteCalled, false);
+});
+
+test('generateBackupControlDocument 必須在建立 Drive 文件前拒絕非標準 schema', () => {
+  let driveCalled = false;
+  const malformedHeaders = [...mod.EXPECTED_HEADERS];
+  malformedHeaders[13] = '異地欄位錯誤';
+  const mockSheet = {
+    getLastRow: () => 2,
+    getLastColumn: () => 22,
+    getRange: () => ({ getValues: () => [malformedHeaders] })
+  };
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({ getSheetByName: () => mockSheet })
+  };
+  const DriveApp = {
+    getFileById: () => {
+      driveCalled = true;
+      throw new Error('Drive 不應被呼叫');
+    },
+    getFolderById: () => {
+      driveCalled = true;
+      throw new Error('Drive 不應被呼叫');
+    }
+  };
+  const runner = new Function(
+    'SpreadsheetApp', 'DriveApp', 'FORM_TEMPLATE_DOC_ID', 'FORM_OUTPUT_FOLDER_ID', 'console',
+    `
+      ${codeJsContent}
+      checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+      return generateBackupControlDocument();
+    `
+  );
+
+  const result = runner(SpreadsheetApp, DriveApp, 'template-id', 'folder-id', console);
+  assert.equal(result.success, false);
+  assert.match(result.message, /runDataMigration/);
+  assert.equal(driveCalled, false, 'schema 不符時不可建立或複製任何 Drive 文件');
+});
