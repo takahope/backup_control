@@ -8,9 +8,9 @@ const SHEET_PERMISSIONS_NAME = '權限';
 const EXPECTED_HEADERS = [
   '時間戳記', '系統ID', '系統名稱', '系統等級', '備份標的', '管理人員',
   '本地_完整週期', '本地_差異週期', '本地_保留代數', '本地_存放地點',
-  '本地_排程時間', '本地_處置方法', '本地_佐證種類',
+  '本地_排程時間', '本地_到期銷毀方法', '本地_銷毀確認方式',
   '是否異地', '異地_週期', '異地_地點', '異地_保留代數',
-  '異地_排程時間', '異地_處置方法', '異地_佐證種類',
+  '異地_排程時間', '異地_到期銷毀方法', '異地_銷毀確認方式',
   'submission_id', 'target_key'
 ];
 
@@ -19,11 +19,24 @@ const EXPECTED_HISTORY_HEADERS = [
   '異動時間戳記', '操作人員', '異動動作',
   '時間戳記', '系統ID', '系統名稱', '系統等級', '備份標的', '管理人員',
   '本地_完整週期', '本地_差異週期', '本地_保留代數', '本地_存放地點',
-  '本地_排程時間', '本地_處置方法', '本地_佐證種類',
+  '本地_排程時間', '本地_到期銷毀方法', '本地_銷毀確認方式',
   '是否異地', '異地_週期', '異地_地點', '異地_保留代數',
-  '異地_排程時間', '異地_處置方法', '異地_佐證種類',
+  '異地_排程時間', '異地_到期銷毀方法', '異地_銷毀確認方式',
   'submission_id', 'target_key'
 ];
+
+// 判定個別欄位表頭是否相容（支援新舊名稱向下相容）
+function isHeaderCompatible_(actual, expected) {
+  if (actual === expected) return true;
+  const aliases = {
+    '本地_到期銷毀方法': ['本地_到期銷毀方法', '本地_處置方法', '本地處置方法'],
+    '本地_銷毀確認方式': ['本地_銷毀確認方式', '本地_佐證種類', '本地佐證種類'],
+    '異地_到期銷毀方法': ['異地_到期銷毀方法', '異地_處置方法', '異地處置方法'],
+    '異地_銷毀確認方式': ['異地_銷毀確認方式', '異地_佐證種類', '異地佐證種類']
+  };
+  const list = aliases[expected];
+  return Boolean(list && list.indexOf(actual) !== -1);
+}
 
 // 嚴格驗證工作表欄位契約；一般資料 API 僅驗證，不在讀寫途中自動遷移。
 function assertSheetSchema_(sheet, expectedHeaders, sheetLabel) {
@@ -44,7 +57,7 @@ function assertSheetSchema_(sheet, expectedHeaders, sheetLabel) {
   const actualHeaders = sheet.getRange(1, 1, 1, expected.length).getValues()[0];
   for (let i = 0; i < expected.length; i++) {
     const actual = String(actualHeaders[i] || '').trim();
-    if (actual !== expected[i]) {
+    if (!isHeaderCompatible_(actual, expected[i])) {
       throw new Error(
         '工作表「' + label + '」欄位結構不符：第 ' + (i + 1) +
         ' 欄預期為「' + expected[i] + '」，實際為「' + actual +
@@ -91,15 +104,15 @@ function resolveHeaderIndices_(headers) {
     localRetention: find_(['本地_保留代數', '本地保留代數', '保留代數']),
     localLocation: find_(['本地_存放地點', '本地存放地點', '存放地點']),
     localScheduleTime: find_(['本地_排程時間', '本地排程時間']),
-    localDispositionMethod: find_(['本地_處置方法', '本地處置方法']),
-    localEvidenceRequirements: find_(['本地_佐證種類', '本地佐證種類']),
+    localDispositionMethod: find_(['本地_到期銷毀方法', '本地到期銷毀方法', '本地_處置方法', '本地處置方法']),
+    localEvidenceRequirements: find_(['本地_銷毀確認方式', '本地銷毀確認方式', '本地_佐證種類', '本地佐證種類']),
     isOffsite: find_(['是否異地', '異地備份', '是否異地備份']),
     offsiteCycle: find_(['異地_週期', '異地週期', '異地備份週期']),
     offsiteLocation: find_(['異地_地點', '異地存放地點', '異地地點']),
     offsiteRetention: find_(['異地_保留代數', '異地保留代數']),
     offsiteScheduleTime: find_(['異地_排程時間', '異地排程時間']),
-    offsiteDispositionMethod: find_(['異地_處置方法', '異地處置方法']),
-    offsiteEvidenceRequirements: find_(['異地_佐證種類', '異地佐證種類']),
+    offsiteDispositionMethod: find_(['異地_到期銷毀方法', '異地到期銷毀方法', '異地_處置方法', '異地處置方法']),
+    offsiteEvidenceRequirements: find_(['異地_銷毀確認方式', '異地銷毀確認方式', '異地_佐證種類', '異地佐證種類']),
     submissionId: find_(['submission_id', 'submissionId']),
     targetKey: find_(['target_key', 'targetKey'])
   };
@@ -206,16 +219,16 @@ function projectBusinessRow_(row, getOldVal) {
   const localRetention = getOldVal(row, ['本地_保留代數', '本地保留代數', '保留代數']) || '4 代';
   const localLocation = getOldVal(row, ['本地_存放地點', '本地存放地點', '存放地點']);
   const localScheduleTime = getOldVal(row, ['本地_排程時間', '本地排程時間']) || '每日 00:00';
-  const localDispositionMethod = getOldVal(row, ['本地_處置方法', '本地處置方法']) || '磁碟自動覆寫';
-  const localEvidenceRequirements = getOldVal(row, ['本地_佐證種類', '本地佐證種類']) || '備份系統執行Log';
+  const localDispositionMethod = getOldVal(row, ['本地_到期銷毀方法', '本地到期銷毀方法', '本地_處置方法', '本地處置方法']) || '磁碟自動覆寫';
+  const localEvidenceRequirements = getOldVal(row, ['本地_銷毀確認方式', '本地銷毀確認方式', '本地_佐證種類', '本地佐證種類']) || '備份系統執行Log';
 
   const rawIsOffsite = String(getOldVal(row, ['是否異地', '異地備份', '是否異地備份']) || '').trim();
   const rawOffsiteCycle = getOldVal(row, ['異地_週期', '異地週期', '異地備份週期']);
   const rawOffsiteLocation = getOldVal(row, ['異地_地點', '異地存放地點', '異地地點']);
   const rawOffsiteRetention = getOldVal(row, ['異地_保留代數', '異地保留代數']);
   const rawOffsiteScheduleTime = getOldVal(row, ['異地_排程時間', '異地排程時間']);
-  const rawOffsiteDispositionMethod = getOldVal(row, ['異地_處置方法', '異地處置方法']);
-  const rawOffsiteEvidenceRequirements = getOldVal(row, ['異地_佐證種類', '異地佐證種類']);
+  const rawOffsiteDispositionMethod = getOldVal(row, ['異地_到期銷毀方法', '異地到期銷毀方法', '異地_處置方法', '異地處置方法']);
+  const rawOffsiteEvidenceRequirements = getOldVal(row, ['異地_銷毀確認方式', '異地銷毀確認方式', '異地_佐證種類', '異地佐證種類']);
 
   const hasOffsiteData = (rawOffsiteLocation && rawOffsiteLocation !== '無' && rawOffsiteLocation !== 'N/A') ||
                          (rawOffsiteCycle && rawOffsiteCycle !== '無' && rawOffsiteCycle !== 'N/A');
@@ -453,7 +466,7 @@ function submitData(formData) {
     }
 
     const timestamp = new Date();
-    let systemId = '';
+    let systemId = String(formData.systemId || '').trim();
     let parsedSystemName = String(formData.systemName || '').trim();
     if (parsedSystemName.indexOf(' - ') !== -1) {
       const parts = parsedSystemName.split(' - ');
@@ -512,6 +525,22 @@ function submitData(formData) {
           existingRowsByTargetKey[targetKey] = [];
         }
         existingRowsByTargetKey[targetKey].push(rowNumber);
+      });
+    }
+
+    // 相容尚未重新載入的舊版前端：編輯 payload 若未帶 systemId，依標的沿用既有列 B 欄值。
+    if (!systemId && existingRawRows.length > 0 && indices.systemId !== -1) {
+      const existingSystemIdsByTargetKey = {};
+      let fallbackSystemId = '';
+      existingRawRows.forEach(function(row) {
+        const rowSystemId = String(row[indices.systemId] || '').trim();
+        if (!rowSystemId) return;
+        const rowTargetKey = normalizeTargetKey_(row[indices.targetKey]) || targetNameToKey_(row[indices.targetName]);
+        if (rowTargetKey) existingSystemIdsByTargetKey[rowTargetKey] = rowSystemId;
+        if (!fallbackSystemId) fallbackSystemId = rowSystemId;
+      });
+      Object.keys(payloadRowsByTargetKey).forEach(function(targetKey) {
+        payloadRowsByTargetKey[targetKey][indices.systemId] = existingSystemIdsByTargetKey[targetKey] || fallbackSystemId;
       });
     }
 
@@ -715,6 +744,33 @@ function runAutoBackfillNow() {
 function autoBackfillTechnicalKeysIfNeeded_(sheet, values, indices) {
   if (!values || values.length === 0) return values;
 
+  const systemIdsByLegacyKey = new Map();
+  values.forEach(function(row) {
+    const systemId = (indices.systemId !== -1 && row[indices.systemId]) ? String(row[indices.systemId]).trim() : '';
+    if (!systemId) return;
+    const systemName = (indices.systemName !== -1 && row[indices.systemName]) ? String(row[indices.systemName]).trim() : '';
+    const systemLevel = (indices.systemLevel !== -1 && row[indices.systemLevel]) ? String(row[indices.systemLevel]).trim() : '';
+    const managerName = (indices.managerName !== -1 && row[indices.managerName]) ? String(row[indices.managerName]).trim() : '';
+    const legacyKey = [systemName, systemLevel, managerName].join('||');
+    if (!systemIdsByLegacyKey.has(legacyKey)) systemIdsByLegacyKey.set(legacyKey, new Set());
+    systemIdsByLegacyKey.get(legacyKey).add(systemId);
+  });
+
+  function buildSystemKey_(row) {
+    const systemId = (indices.systemId !== -1 && row[indices.systemId]) ? String(row[indices.systemId]).trim() : '';
+    const systemName = (indices.systemName !== -1 && row[indices.systemName]) ? String(row[indices.systemName]).trim() : '';
+    const systemLevel = (indices.systemLevel !== -1 && row[indices.systemLevel]) ? String(row[indices.systemLevel]).trim() : '';
+    const managerName = (indices.managerName !== -1 && row[indices.managerName]) ? String(row[indices.managerName]).trim() : '';
+    if (systemId) return 'systemId||' + systemId;
+
+    const legacyKey = [systemName, systemLevel, managerName].join('||');
+    const candidateIds = systemIdsByLegacyKey.get(legacyKey);
+    if (candidateIds && candidateIds.size === 1) {
+      return 'systemId||' + Array.from(candidateIds)[0];
+    }
+    return 'legacy||' + legacyKey;
+  }
+
   // 1. 唯讀快篩：若無任何空白技術欄位，直接跳出（Fast-path）
   let hasMissing = false;
   for (let i = 0; i < values.length; i++) {
@@ -742,12 +798,10 @@ function autoBackfillTechnicalKeysIfNeeded_(sheet, values, indices) {
   const systemToExistingUuid = new Map();
   values.forEach(function(row) {
     const sysName = (indices.systemName !== -1 && row[indices.systemName]) ? String(row[indices.systemName]).trim() : '';
-    const sysLevel = (indices.systemLevel !== -1 && row[indices.systemLevel]) ? String(row[indices.systemLevel]).trim() : '';
-    const mgrName = (indices.managerName !== -1 && row[indices.managerName]) ? String(row[indices.managerName]).trim() : '';
     const subId = (indices.submissionId !== -1 && row[indices.submissionId]) ? String(row[indices.submissionId]).trim() : '';
 
     if (sysName && subId) {
-      const sysKey = [sysName, sysLevel, mgrName].join('||');
+      const sysKey = buildSystemKey_(row);
       if (!systemToExistingUuid.has(sysKey)) {
         systemToExistingUuid.set(sysKey, subId);
       }
@@ -760,13 +814,11 @@ function autoBackfillTechnicalKeysIfNeeded_(sheet, values, indices) {
 
   values.forEach(function(row) {
     const sysName = (indices.systemName !== -1 && row[indices.systemName]) ? String(row[indices.systemName]).trim() : '';
-    const sysLevel = (indices.systemLevel !== -1 && row[indices.systemLevel]) ? String(row[indices.systemLevel]).trim() : '';
-    const mgrName = (indices.managerName !== -1 && row[indices.managerName]) ? String(row[indices.managerName]).trim() : '';
     const tgtName = (indices.targetName !== -1 && row[indices.targetName]) ? String(row[indices.targetName]).trim() : '';
 
     if (!sysName || !tgtName) return;
 
-    const sysKey = [sysName, sysLevel, mgrName].join('||');
+    const sysKey = buildSystemKey_(row);
     let currentSubId = (indices.submissionId !== -1 && row[indices.submissionId] !== undefined) ? String(row[indices.submissionId]).trim() : '';
     let currentTargetKey = (indices.targetKey !== -1 && row[indices.targetKey] !== undefined) ? normalizeTargetKey_(row[indices.targetKey]) : '';
     let rowChanged = false;
@@ -868,6 +920,7 @@ function getDashboardData() {
         bySubmission.set(submissionKey, {
           id: submissionKey,
           timestamp: ts,
+          systemId: systemId,
           systemName: systemName,
           systemLevel: systemLevel || '一般系統',
           managerName: managerName,
@@ -880,7 +933,9 @@ function getDashboardData() {
 
     const latestBySystem = new Map();
     bySubmission.forEach(function(record) {
-      const systemKey = [record.systemName, record.systemLevel, record.managerName].join('||');
+      const systemKey = record.systemId
+        ? ('systemId||' + record.systemId)
+        : ('legacy||' + [record.systemName, record.systemLevel, record.managerName].join('||'));
       const existing = latestBySystem.get(systemKey);
       if (!existing || record.timestamp >= existing.timestamp) {
         latestBySystem.set(systemKey, record);
@@ -892,6 +947,7 @@ function getDashboardData() {
       .map(function(item) {
         return {
           id: item.id,
+          systemId: item.systemId,
           systemName: item.systemName,
           systemLevel: item.systemLevel,
           managerName: item.managerName,
@@ -1033,15 +1089,15 @@ function buildSheetRowData_(options) {
     retentionDisplay,                                                            // 9. 本地_保留代數
     target.localLocation || '',                                                  // 10. 本地_存放地點
     localScheduleTime,                                                           // 11. 本地_排程時間
-    localDispositionMethod,                                                      // 12. 本地_處置方法
-    localEvidenceRequirements,                                                   // 13. 本地_佐證種類
+    localDispositionMethod,                                                      // 12. 本地_到期銷毀方法
+    localEvidenceRequirements,                                                   // 13. 本地_銷毀確認方式
     target.isOffsite,                                                            // 14. 是否異地
     offsiteCycleDisplay,                                                         // 15. 異地_週期
     target.isOffsite === '是' ? (target.offsiteLocation || '') : '無',           // 16. 異地_地點
     offsiteRetentionDisplay,                                                     // 17. 異地_保留代數
     offsiteScheduleTime,                                                         // 18. 異地_排程時間
-    offsiteDispositionMethod,                                                    // 19. 異地_處置方法
-    offsiteEvidenceRequirements,                                                 // 20. 異地_佐證種類
+    offsiteDispositionMethod,                                                    // 19. 異地_到期銷毀方法
+    offsiteEvidenceRequirements,                                                 // 20. 異地_銷毀確認方式
     options.submissionId,                                                        // 21. submission_id
     targetKey                                                                    // 22. target_key
   ];

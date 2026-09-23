@@ -321,7 +321,7 @@ test('autoBackfillTechnicalKeysIfNeeded_ 正確為同一系統的多標的補齊
   assert.equal(result[1][21], 'log', '系統日誌檔標的應補齊為 log');
 });
 
-test('autoBackfillTechnicalKeysIfNeeded_ 部分缺失時正確繼承同系統既有 UUID', () => {
+test('autoBackfillTechnicalKeysIfNeeded_ 系統 ID 部分缺失時正確繼承唯一同系統既有 UUID', () => {
   let writtenData = null;
   const mockSheet = {
     getRange: () => ({
@@ -331,7 +331,7 @@ test('autoBackfillTechnicalKeysIfNeeded_ 部分缺失時正確繼承同系統既
 
   const partialRows = [
     ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '資料庫', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'existing-uuid-999', 'db'],
-    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '原始碼', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+    ['2026/9/19 10:00:00', '', 'HIS系統', '關鍵核心系統', '原始碼', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
   ];
 
   const indices = mod.resolveHeaderIndices_(mod.EXPECTED_HEADERS);
@@ -394,10 +394,40 @@ test('整合驗證：缺失技術欄位時 getDashboardData 能自動補齊並�
 
   assert.equal(resp.success, true, 'getDashboardData 必須成功');
   assert.equal(resp.data.length, 1, '應聚合為 1 個系統卡片');
+  assert.equal(resp.data[0].systemId, 'SYS-01', '讀取結果必須保留 B 欄系統 ID 供編輯回填');
   assert.equal(resp.data[0].systemName, 'HIS系統');
   assert.equal(resp.data[0].targets.length, 2, '該系統卡片底下的 targets 必須包含全部 2 個標的（資料庫與系統日誌檔），絕不可遺漏');
   assert.equal(resp.data[0].targets[0].targetName, '資料庫');
   assert.equal(resp.data[0].targets[1].targetName, '系統日誌檔');
+});
+
+test('getDashboardData 不得合併系統 ID 不同但名稱與管理人員相同的紀錄', () => {
+  const mockRows = [
+    ['2026/9/22 10:00:00', 'SYS-01', '同名系統', '一般系統', '資料庫', '王小明', '1 週', '無', '4 代', 'NAS-01', '每日 00:00', '磁碟自動覆寫', 'Log', '否', '', '', '', '無', '無', '無', '', ''],
+    ['2026/9/23 10:00:00', 'SYS-02', '同名系統', '一般系統', '資料庫', '王小明', '1 週', '無', '4 代', 'NAS-02', '每日 00:00', '磁碟自動覆寫', 'Log', '否', '', '', '', '無', '無', '無', '', '']
+  ];
+  const mockSheet = {
+    getLastRow: () => 3,
+    getLastColumn: () => 22,
+    getMaxColumns: () => 22,
+    getRange: row => ({
+      getValues: () => row === 1 ? [mod.EXPECTED_HEADERS] : mockRows,
+      setValues: () => {}
+    })
+  };
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({ getSheetByName: name => name === '備份管制' ? mockSheet : null })
+  };
+  const runner = new Function('SpreadsheetApp', 'Utilities', 'console', `
+    ${codeJsContent}
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return getDashboardData();
+  `);
+
+  let uuidCounter = 0;
+  const resp = runner(SpreadsheetApp, { getUuid: () => 'generated-' + (++uuidCounter) }, console);
+  assert.equal(resp.success, true);
+  assert.deepEqual(resp.data.map(item => item.systemId).sort(), ['SYS-01', 'SYS-02']);
 });
 
 test('ensureSheetColumnsExist_ 在格線不足 22 欄時正確擴展欄位，超過時不重複插入', () => {
@@ -466,6 +496,80 @@ test('submitData 遇到非標準 A:V 表頭時必須拒絕寫入並提示執行�
   assert.equal(result.success, false);
   assert.match(result.message, /runDataMigration/);
   assert.equal(writeCalled, false, 'schema 不符時不得覆寫、追加或刪除任何資料列');
+});
+
+test('submitData 編輯舊版前端 payload 時必須依標的保留各列既有 B 欄系統 ID', () => {
+  const existingDbRow = [
+    new Date('2026-09-23T01:00:00Z'), 'SYS-001', '測試系統', '一般系統', '資料庫', '王小明',
+    '1 週', '無', '4 代', 'NAS', '每日 00:00', '磁碟自動覆寫', '備份系統執行Log',
+    '否', '無', '無', '無', '無', '無', '無', 'sub-001', 'db'
+  ];
+  const existingSourceRow = [
+    new Date('2026-09-23T01:00:00Z'), 'SYS-002', '測試系統', '一般系統', '原始碼', '王小明',
+    '1 週', '無', '4 代', 'Git', '每日 00:00', '磁碟自動覆寫', '備份系統執行Log',
+    '否', '無', '無', '無', '無', '無', '無', 'sub-001', 'source'
+  ];
+  const updatedRows = {};
+
+  function makeSheet(rows, headers, captureUpdate) {
+    return {
+      getLastRow: () => rows.length,
+      getLastColumn: () => headers.length,
+      getRange: (row, col, numRows, numCols) => ({
+        getValues: () => rows
+          .slice(row - 1, row - 1 + numRows)
+          .map(sourceRow => sourceRow.slice(col - 1, col - 1 + numCols)),
+        setValues: values => {
+          if (captureUpdate && row >= 2 && col === 1) updatedRows[row] = values[0];
+          while (rows.length < row - 1 + values.length) rows.push([]);
+          values.forEach((valueRow, index) => { rows[row - 1 + index] = valueRow.slice(); });
+        },
+        setFontWeight: () => {},
+        setBackground: () => {}
+      }),
+      setFrozenRows: () => {},
+      deleteRow: rowNumber => rows.splice(rowNumber - 1, 1)
+    };
+  }
+
+  const mainSheet = makeSheet([mod.EXPECTED_HEADERS, existingDbRow, existingSourceRow], mod.EXPECTED_HEADERS, true);
+  const historySheet = makeSheet([mod.EXPECTED_HISTORY_HEADERS], mod.EXPECTED_HISTORY_HEADERS, false);
+  const spreadsheet = {
+    getSheetByName: name => name === '備份管制' ? mainSheet : (name === '備份管制_歷程' ? historySheet : null),
+    insertSheet: () => historySheet
+  };
+  const SpreadsheetApp = { getActiveSpreadsheet: () => spreadsheet };
+  const Utilities = { getUuid: () => 'new-uuid' };
+  const Session = { getActiveUser: () => ({ getEmail: () => 'admin@example.com' }) };
+  const runner = new Function('SpreadsheetApp', 'Utilities', 'Session', 'console', `
+    ${codeJsContent}
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return submitData({
+      id: 'sub-001',
+      systemName: '測試系統',
+      systemLevel: '一般系統',
+      managerName: '王小明',
+      targets: [
+        {
+          targetKey: 'db', targetName: '資料庫',
+          localFullValue: '1', localFullUnit: '週', localDiffValue: '0', localDiffUnit: '天',
+          localRetention: '4', localLocation: 'NAS', isOffsite: '否'
+        },
+        {
+          targetKey: 'source', targetName: '原始碼',
+          localFullValue: '1', localFullUnit: '週', localDiffValue: '0', localDiffUnit: '天',
+          localRetention: '4', localLocation: 'Git', isOffsite: '否'
+        }
+      ]
+    });
+  `);
+
+  const result = runner(SpreadsheetApp, Utilities, Session, console);
+  assert.equal(result.success, true);
+  assert.equal(updatedRows[2][1], 'SYS-001', '資料庫列應保留自己的 B 欄');
+  assert.equal(updatedRows[3][1], 'SYS-002', '原始碼列應保留自己的 B 欄');
+  assert.equal(updatedRows[2][20], 'sub-001');
+  assert.equal(updatedRows[3][20], 'sub-001');
 });
 
 test('backfillMissingTechnicalKeys 只能寫入 U:V，不得重寫 A:T 業務欄位', () => {
@@ -607,4 +711,138 @@ test('generateBackupControlDocument 必須在建立 Drive 文件前拒絕非標�
   assert.equal(result.success, false);
   assert.match(result.message, /runDataMigration/);
   assert.equal(driveCalled, false, 'schema 不符時不可建立或複製任何 Drive 文件');
+});
+
+test('EXPECTED_HEADERS 包含新版銷毀方法與確認方式表頭', () => {
+  assert.equal(mod.EXPECTED_HEADERS[11], '本地_到期銷毀方法');
+  assert.equal(mod.EXPECTED_HEADERS[12], '本地_銷毀確認方式');
+  assert.equal(mod.EXPECTED_HEADERS[18], '異地_到期銷毀方法');
+  assert.equal(mod.EXPECTED_HEADERS[19], '異地_銷毀確認方式');
+  assert.equal(mod.EXPECTED_HEADERS.length, 22);
+
+  assert.equal(mod.EXPECTED_HISTORY_HEADERS[14], '本地_到期銷毀方法');
+  assert.equal(mod.EXPECTED_HISTORY_HEADERS[15], '本地_銷毀確認方式');
+  assert.equal(mod.EXPECTED_HISTORY_HEADERS[21], '異地_到期銷毀方法');
+  assert.equal(mod.EXPECTED_HISTORY_HEADERS[22], '異地_銷毀確認方式');
+  assert.equal(mod.EXPECTED_HISTORY_HEADERS.length, 25);
+});
+
+test('resolveHeaderIndices_ 正確相容解析新版表頭與歷史處置/佐證別名', () => {
+  // 1. 新版標準表頭解析
+  const newIndices = mod.resolveHeaderIndices_(mod.EXPECTED_HEADERS);
+  assert.equal(newIndices.localDispositionMethod, 11);
+  assert.equal(newIndices.localEvidenceRequirements, 12);
+  assert.equal(newIndices.offsiteDispositionMethod, 18);
+  assert.equal(newIndices.offsiteEvidenceRequirements, 19);
+
+  // 2. 舊版歷史 22 欄表頭解析（向下相容）
+  const LEGACY_22_HEADERS = [
+    '時間戳記', '系統ID', '系統名稱', '系統等級', '備份標的', '管理人員',
+    '本地_完整週期', '本地_差異週期', '本地_保留代數', '本地_存放地點',
+    '本地_排程時間', '本地_處置方法', '本地_佐證種類',
+    '是否異地', '異地_週期', '異地_地點', '異地_保留代數',
+    '異地_排程時間', '異地_處置方法', '異地_佐證種類',
+    'submission_id', 'target_key'
+  ];
+  const legacyIndices = mod.resolveHeaderIndices_(LEGACY_22_HEADERS);
+  assert.equal(legacyIndices.localDispositionMethod, 11, '歷史表頭本地_處置方法應正確解析');
+  assert.equal(legacyIndices.localEvidenceRequirements, 12, '歷史表頭本地_佐證種類應正確解析');
+  assert.equal(legacyIndices.offsiteDispositionMethod, 18, '歷史表頭異地_處置方法應正確解析');
+  assert.equal(legacyIndices.offsiteEvidenceRequirements, 19, '歷史表頭異地_佐證種類應正確解析');
+});
+
+test('migrateSheetIfNeeded_ 將歷史舊版處置/佐證表頭平滑升級為新版表頭且資料無損', () => {
+  const LEGACY_22_HEADERS = [
+    '時間戳記', '系統ID', '系統名稱', '系統等級', '備份標的', '管理人員',
+    '本地_完整週期', '本地_差異週期', '本地_保留代數', '本地_存放地點',
+    '本地_排程時間', '本地_處置方法', '本地_佐證種類',
+    '是否異地', '異地_週期', '異地_地點', '異地_保留代數',
+    '異地_排程時間', '異地_處置方法', '異地_佐證種類',
+    'submission_id', 'target_key'
+  ];
+  const legacyRow = [
+    '2026/09/20 12:00:00', 'SYS-001', '人資系統', '關鍵核心系統', '資料庫', '王小明',
+    '1 週', '1 天', '4 代', 'NAS-01',
+    '每日 00:00', '磁碟自動覆寫', '備份系統執行Log',
+    '是', '1 週', '雲端空間', '4 代',
+    '每日 00:00', '磁碟自動覆寫', '備份系統執行Log',
+    'sub-001', 'db'
+  ];
+
+  const sheetData = [LEGACY_22_HEADERS.slice(), legacyRow.slice()];
+  let writtenValues = null;
+
+  const mockSheet = {
+    getLastRow: () => sheetData.length,
+    getLastColumn: () => 22,
+    getRange: (row, col, numRows, numCols) => ({
+      getValues: () => sheetData.slice(row - 1, row - 1 + numRows).map(r => r.slice(col - 1, col - 1 + numCols)),
+      setValues: (values) => {
+        writtenValues = values;
+        values.forEach((r, idx) => {
+          sheetData[row - 1 + idx] = r.slice();
+        });
+      },
+      setFontWeight: () => {},
+      setBackground: () => {}
+    }),
+    clearContents: () => {
+      sheetData.length = 0;
+    },
+    setFrozenRows: () => {}
+  };
+
+  mod.migrateSheetIfNeeded_(mockSheet, mod.EXPECTED_HEADERS, false);
+
+  assert.deepEqual(sheetData[0], mod.EXPECTED_HEADERS, '表頭應成功更新為新版表頭');
+  assert.equal(sheetData[1][11], '磁碟自動覆寫', '第 12 欄到期銷毀方法資料應完整保留');
+  assert.equal(sheetData[1][12], '備份系統執行Log', '第 13 欄銷毀確認方式資料應完整保留');
+  assert.equal(sheetData[1][18], '磁碟自動覆寫', '第 19 欄異地到期銷毀方法資料應完整保留');
+  assert.equal(sheetData[1][19], '備份系統執行Log', '第 20 欄異地銷毀確認方式資料應完整保留');
+  assert.equal(sheetData[1][20], 'sub-001');
+  assert.equal(sheetData[1][21], 'db');
+});
+
+test('assertSheetSchema_ 與 getDashboardData 在使用歷史 22 欄表頭（本地_處置方法等）時必須相容通過', () => {
+  const LEGACY_22_HEADERS = [
+    '時間戳記', '系統ID', '系統名稱', '系統等級', '備份標的', '管理人員',
+    '本地_完整週期', '本地_差異週期', '本地_保留代數', '本地_存放地點',
+    '本地_排程時間', '本地_處置方法', '本地_佐證種類',
+    '是否異地', '異地_週期', '異地_地點', '異地_保留代數',
+    '異地_排程時間', '異地_處置方法', '異地_佐證種類',
+    'submission_id', 'target_key'
+  ];
+  const legacyRow = [
+    '2026/09/20 12:00:00', 'SYS-001', '人資系統', '關鍵核心系統', '資料庫', '王小明',
+    '1 週', '1 天', '4 代', 'NAS-01',
+    '每日 00:00', '磁碟自動覆寫', '備份系統執行Log',
+    '是', '1 週', '雲端空間', '4 代',
+    '每日 00:00', '磁碟自動覆寫', '備份系統執行Log',
+    'sub-001', 'db'
+  ];
+
+  const mockSheet = {
+    getLastRow: () => 2,
+    getLastColumn: () => 22,
+    getRange: (r, c, nr, nc) => {
+      if (r === 1) return { getValues: () => [LEGACY_22_HEADERS] };
+      return { getValues: () => [legacyRow], setValues: () => {} };
+    }
+  };
+
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({ getSheetByName: () => mockSheet })
+  };
+
+  const runner = new Function('SpreadsheetApp', 'console', `
+    ${codeJsContent}
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return getDashboardData();
+  `);
+
+  const result = runner(SpreadsheetApp, console);
+  assert.equal(result.success, true, '歷史 22 欄表頭工作表必須相容通過，不可回傳失敗');
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].systemName, '人資系統');
+  assert.equal(result.data[0].targets[0].localDispositionMethod, '磁碟自動覆寫');
 });

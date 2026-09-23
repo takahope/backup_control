@@ -139,8 +139,9 @@
           <datalist id="systemOptionsList"></datalist>
           <datalist id="assetOptionsList"></datalist>
 
-          <!-- 隱藏的 ID 欄位，用於判斷是新增還是更新 -->
-          <input type="hidden" id="systemId" value="">
+          <!-- 隱藏識別欄位：submissionId 對應 U 欄，sourceSystemId 對應 B 欄 -->
+          <input type="hidden" id="submissionId" value="">
+          <input type="hidden" id="sourceSystemId" value="">
           
           <!-- 第一區：系統基本資訊 -->
           <div class="mb-8 p-5 bg-blue-50 rounded-xl border border-blue-100">
@@ -576,6 +577,7 @@
     let assetOptionsData = [];
     let dashboardLoadProgress = 0;
     let dashboardLoadTimer = null;
+    let dashboardLoadError = null;
 
     // --- 安全工具：避免將使用者輸入直接注入 innerHTML ---
     function escapeHtml(value) {
@@ -628,30 +630,63 @@
       const offsiteDisp = offsiteEnabled ? safeText(target.offsiteDispositionMethod, '磁碟自動覆寫') : '無';
       const offsiteEvid = offsiteEnabled ? safeText(target.offsiteEvidenceRequirements, '備份系統執行Log') : '無';
 
-      return `
-        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2">
-          <div class="text-sm font-semibold text-gray-800 mb-2">${name}</div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-700">
-            <div><span class="text-gray-500">本地差異：</span>${localDiff}</div>
-            <div><span class="text-gray-500">本地完整：</span>${localFull}</div>
-            <div><span class="text-gray-500">本地保留：</span>${localRetention}</div>
-            <div><span class="text-gray-500">本地位置：</span>${localLocation}</div>
-            <div><span class="text-gray-500">本地排程：</span>${localSchedule}</div>
-            <div><span class="text-gray-500">本地處置：</span>${localDisp}</div>
-            <div class="md:col-span-2"><span class="text-gray-500">本地佐證：</span>${localEvid}</div>
-            <div class="border-t border-gray-200 my-1 md:col-span-2"></div>
-            <div><span class="text-gray-500">是否異地：</span>${offsiteEnabled ? '是' : '否'}</div>
-            <div><span class="text-gray-500">異地週期：</span>${offsiteCycle}</div>
-            <div><span class="text-gray-500">異地位置：</span>${offsiteLocation}</div>
-            <div><span class="text-gray-500">異地保留：</span>${offsiteRetention}</div>
-            ${offsiteEnabled ? `
-            <div><span class="text-gray-500">異地排程：</span>${offsiteSchedule}</div>
-            <div><span class="text-gray-500">異地處置：</span>${offsiteDisp}</div>
-            <div class="md:col-span-2"><span class="text-gray-500">異地佐證：</span>${offsiteEvid}</div>
-            ` : ''}
-          </div>
-        </div>
-      `;
+      const localHtml = [
+        '<div class="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5">',
+        '  <div class="flex items-center space-x-1.5 mb-2 pb-1.5 border-b border-slate-200/70">',
+        '    <span class="w-2 h-2 rounded-full bg-blue-600 inline-block"></span>',
+        '    <span class="text-xs font-bold text-slate-800 tracking-wide">本地備份</span>',
+        '  </div>',
+        '  <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-700">',
+        '    <div><span class="text-slate-500">完整週期：</span>' + localFull + '</div>',
+        '    <div><span class="text-slate-500">差異週期：</span>' + localDiff + '</div>',
+        '    <div><span class="text-slate-500">保留代數：</span>' + localRetention + '</div>',
+        '    <div><span class="text-slate-500">存放設備：</span>' + localLocation + '</div>',
+        '    <div class="sm:col-span-2"><span class="text-slate-500">排程時間：</span>' + localSchedule + '</div>',
+        '    <div class="sm:col-span-2"><span class="text-slate-500">到期銷毀方法：</span>' + localDisp + '</div>',
+        '    <div class="sm:col-span-2"><span class="text-slate-500">銷毀確認方式：</span>' + localEvid + '</div>',
+        '  </div>',
+        '</div>'
+      ].join('');
+
+      let offsiteHtml = '';
+      if (offsiteEnabled) {
+        offsiteHtml = [
+          '<div class="rounded-lg border border-purple-200 bg-purple-50/70 p-2.5">',
+          '  <div class="flex items-center space-x-1.5 mb-2 pb-1.5 border-b border-purple-200/70">',
+          '    <span class="w-2 h-2 rounded-full bg-purple-600 inline-block"></span>',
+          '    <span class="text-xs font-bold text-purple-900 tracking-wide">異地備份</span>',
+          '  </div>',
+          '  <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs text-purple-900">',
+          '    <div><span class="text-purple-600 font-medium">備份週期：</span>' + offsiteCycle + '</div>',
+          '    <div><span class="text-purple-600 font-medium">保留代數：</span>' + offsiteRetention + '</div>',
+          '    <div class="sm:col-span-2"><span class="text-purple-600 font-medium">存放地點：</span>' + offsiteLocation + '</div>',
+          '    <div class="sm:col-span-2"><span class="text-purple-600 font-medium">排程時間：</span>' + offsiteSchedule + '</div>',
+          '    <div class="sm:col-span-2"><span class="text-purple-600 font-medium">到期銷毀方法：</span>' + offsiteDisp + '</div>',
+          '    <div class="sm:col-span-2"><span class="text-purple-600 font-medium">銷毀確認方式：</span>' + offsiteEvid + '</div>',
+          '  </div>',
+          '</div>'
+        ].join('');
+      } else {
+        offsiteHtml = [
+          '<div class="rounded-lg border border-dashed border-gray-200 bg-gray-50/60 py-2 px-3 flex items-center justify-between text-xs text-gray-500">',
+          '  <div class="flex items-center space-x-1.5">',
+          '    <span class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span>',
+          '    <span class="font-medium text-gray-600">未啟用異地備份</span>',
+          '  </div>',
+          '  <span class="text-[11px] text-gray-400">僅本地保存</span>',
+          '</div>'
+        ].join('');
+      }
+
+      return [
+        '<div class="rounded-xl border border-gray-200 bg-white p-3 mb-2.5 shadow-sm">',
+        '  <div class="text-sm font-bold text-gray-800 mb-2">' + name + '</div>',
+        '  <div class="flex flex-col gap-2">',
+        localHtml,
+        offsiteHtml,
+        '  </div>',
+        '</div>'
+      ].join('');
     }
 
     // --- 系統所有的備份標的清單 (設定檔) ---
@@ -795,7 +830,14 @@
       const targetData = sourceRadio.value === 'systems' ? systemOptionsData : assetOptionsData;
       
       const matched = targetData.find(item => item.name === inputVal);
+      const sourceSystemIdEl = document.getElementById('sourceSystemId');
+      if (!matched) {
+        if (sourceSystemIdEl) sourceSystemIdEl.value = '';
+        return;
+      }
       if (matched && matched.level) {
+        const nameParts = inputVal.split(' - ');
+        if (sourceSystemIdEl) sourceSystemIdEl.value = nameParts.length > 1 ? nameParts[0].trim() : '';
         const levelSelect = document.getElementById('systemLevel');
         if (levelSelect && levelSelect.value !== matched.level) {
           levelSelect.value = matched.level;
@@ -834,9 +876,11 @@
           .withSuccessHandler(function(response) {
             if (response && response.success && Array.isArray(response.data)) {
               appData = response.data;
+              dashboardLoadError = null;
             } else {
               appData = [];
               const errMsg = (response && response.message) ? response.message : '後端讀取資料失敗。';
+              dashboardLoadError = errMsg;
               console.warn('[loadDashboardData] 後端回傳失敗：', errMsg);
             }
             if (showProgress) {
@@ -847,6 +891,7 @@
           .withFailureHandler(function(error) {
             appData = [];
             const errMsg = (error && error.message) ? error.message : '連線逾時或後端拋出例外。';
+            dashboardLoadError = errMsg;
             console.error('[loadDashboardData] RPC 呼叫失敗：', errMsg);
             if (showProgress) {
               finishDashboardLoading();
@@ -857,6 +902,7 @@
       } else {
         // 本地純靜態瀏覽預覽環境
         appData = [];
+        dashboardLoadError = null;
         if (showProgress) {
           finishDashboardLoading();
         }
@@ -936,7 +982,7 @@
         tabDashboard.className = 'nav-inactive px-3 py-2 flex items-center transition-colors duration-200';
         
         // 只有在按下「新增設定」Tab 時才重置表單 (如果是編輯進來的，保留資料)
-        if (!document.getElementById('systemId').value) {
+        if (!document.getElementById('submissionId').value) {
           resetForm();
         }
       }
@@ -976,14 +1022,27 @@
       if (filteredData.length === 0) {
         container.innerHTML = '';
         emptyState.classList.remove('hidden');
-        if(appData.length > 0) {
+        const emptyBtn = emptyState.querySelector('button');
+        if (dashboardLoadError) {
+          emptyState.querySelector('h3').innerText = '資料載入失敗';
+          emptyState.querySelector('p').innerText = dashboardLoadError;
+          if (emptyBtn) {
+            emptyBtn.innerText = '重試載入';
+            emptyBtn.onclick = () => loadDashboardData({ showProgress: true });
+            emptyBtn.classList.remove('hidden');
+          }
+        } else if (appData.length > 0) {
           emptyState.querySelector('h3').innerText = '找不到符合條件的系統';
           emptyState.querySelector('p').innerText = '請嘗試其他的搜尋關鍵字。';
-          emptyState.querySelector('button').classList.add('hidden');
+          if (emptyBtn) emptyBtn.classList.add('hidden');
         } else {
           emptyState.querySelector('h3').innerText = '目前尚無備份設定';
           emptyState.querySelector('p').innerText = '點擊上方「新增設定」開始建立第一筆紀錄。';
-          emptyState.querySelector('button').classList.remove('hidden');
+          if (emptyBtn) {
+            emptyBtn.innerText = '立即新增';
+            emptyBtn.onclick = () => switchTab('form');
+            emptyBtn.classList.remove('hidden');
+          }
         }
         return;
       }
@@ -1098,7 +1157,8 @@
       document.getElementById('formTitle').innerText = `編輯系統備份設定：${sys.systemName}`;
       document.getElementById('cancelEditBtn').classList.remove('hidden');
       document.getElementById('submitBtn').innerText = '更新儲存紀錄';
-      document.getElementById('systemId').value = sys.id;
+      document.getElementById('submissionId').value = sys.id;
+      document.getElementById('sourceSystemId').value = sys.systemId || '';
 
       // 填入基本資料
       document.getElementById('systemName').value = sys.systemName;
@@ -1179,7 +1239,7 @@
             if (ddEl && parsed.diff.day) ddEl.value = parsed.diff.day;
           }
 
-          // 本地處置方法與佐證回填
+          // 本地到期銷毀方法與銷毀確認方式回填
           const elLocalDisp = document.getElementById(`localDispositionMethod_${tid}`);
           const elLocalEvid = document.getElementById(`localEvidenceRequirements_${tid}`);
           setChoiceSelectValue_(elLocalDisp, tData.localDispositionMethod, '磁碟自動覆寫');
@@ -1263,8 +1323,10 @@
     function resetForm() {
       const form = document.getElementById('backupForm');
       if (form) form.reset();
-      const sysIdEl = document.getElementById('systemId');
-      if (sysIdEl) sysIdEl.value = '';
+      const submissionIdEl = document.getElementById('submissionId');
+      if (submissionIdEl) submissionIdEl.value = '';
+      const sourceSystemIdEl = document.getElementById('sourceSystemId');
+      if (sourceSystemIdEl) sourceSystemIdEl.value = '';
       const formTitleEl = document.getElementById('formTitle');
       if (formTitleEl) formTitleEl.innerText = '新增備份管制設定單';
       const cancelEditBtn = document.getElementById('cancelEditBtn');
@@ -1362,11 +1424,11 @@
                 </div>
               </div>
               <div class="flex flex-col mt-2">
-                <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-medium text-gray-600 mb-1">到期銷毀方法 <span class="text-red-500">*</span></label>
                 ${renderChoiceSelectHtml_(`localDispositionMethod_${target.id}`, DISPOSITION_METHOD_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
               <div class="flex flex-col mt-2">
-                <label class="block text-sm font-medium text-gray-600 mb-1">本地佐證種類 <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-medium text-gray-600 mb-1">銷毀確認方式 <span class="text-red-500">*</span></label>
                 ${renderChoiceSelectHtml_(`localEvidenceRequirements_${target.id}`, EVIDENCE_REQUIREMENT_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
             </div>
@@ -1421,11 +1483,11 @@
                 </div>
               </div>
               <div class="flex flex-col mt-2">
-                <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-medium text-gray-600 mb-1">到期銷毀方法 <span class="text-red-500">*</span></label>
                 ${renderChoiceSelectHtml_(`localDispositionMethod_${target.id}`, DISPOSITION_METHOD_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
               <div class="flex flex-col mt-2">
-                <label class="block text-sm font-medium text-gray-600 mb-1">本地佐證種類 <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-medium text-gray-600 mb-1">銷毀確認方式 <span class="text-red-500">*</span></label>
                 ${renderChoiceSelectHtml_(`localEvidenceRequirements_${target.id}`, EVIDENCE_REQUIREMENT_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
             </div>
@@ -1499,11 +1561,11 @@
                       </div>
                     </div>
                     <div>
-                      <label class="block text-sm font-medium text-purple-800 mb-1">異地處置方法 <span class="text-red-500">*</span></label>
+                      <label class="block text-sm font-medium text-purple-800 mb-1">到期銷毀方法 <span class="text-red-500">*</span></label>
                       ${renderChoiceSelectHtml_(`offsiteDispositionMethod_${target.id}`, DISPOSITION_METHOD_OPTIONS, 'block w-full rounded-md border-purple-300 shadow-sm p-2 border bg-white focus:ring-purple-500')}
                     </div>
                     <div>
-                      <label class="block text-sm font-medium text-purple-800 mb-1">異地佐證種類 <span class="text-red-500">*</span></label>
+                      <label class="block text-sm font-medium text-purple-800 mb-1">銷毀確認方式 <span class="text-red-500">*</span></label>
                       ${renderChoiceSelectHtml_(`offsiteEvidenceRequirements_${target.id}`, EVIDENCE_REQUIREMENT_OPTIONS, 'block w-full rounded-md border-purple-300 shadow-sm p-2 border bg-white focus:ring-purple-500')}
                     </div>
                   </div>
@@ -1658,7 +1720,7 @@
       
       const submitBtn = document.getElementById('submitBtn');
       const statusMessage = document.getElementById('statusMessage');
-      const systemId = document.getElementById('systemId').value;
+      const submissionId = document.getElementById('submissionId').value;
       
       const activeTargets = backupTargets.filter(t => document.getElementById(`check_${t.id}`).checked);
       
@@ -1720,7 +1782,8 @@
       });
 
       const formData = {
-        id: systemId || '', // 新增時由後端產生 submission_id
+        id: submissionId || '', // 新增時由後端產生 submission_id
+        systemId: document.getElementById('sourceSystemId').value,
         systemName: document.getElementById('systemName').value,
         systemLevel: document.getElementById('systemLevel').value,
         managerName: document.getElementById('managerName').value,
@@ -1746,16 +1809,16 @@
           .submitData(formData);
       } else {
         // 本地純預覽測試環境（無 GAS 環境）
-        const localId = systemId || ('local_' + Date.now().toString());
+        const localId = submissionId || ('local_' + Date.now().toString());
         const localRecord = Object.assign({}, formData, { id: localId });
-        if (systemId) {
-          const index = appData.findIndex(s => s.id === systemId);
+        if (submissionId) {
+          const index = appData.findIndex(s => s.id === submissionId);
           if (index !== -1) appData[index] = localRecord;
         } else {
           appData.push(localRecord);
         }
         setTimeout(() => {
-          handleSuccess(systemId ? '系統設定已成功更新！' : '資料已成功新增！');
+          handleSuccess(submissionId ? '系統設定已成功更新！' : '資料已成功新增！');
         }, 500);
       }
 
@@ -1779,7 +1842,7 @@
       // 內部錯誤處理函數
       function handleError(msg) {
         submitBtn.disabled = false;
-        submitBtn.innerText = systemId ? '更新儲存紀錄' : '儲存並送出紀錄';
+        submitBtn.innerText = submissionId ? '更新儲存紀錄' : '儲存並送出紀錄';
         submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
         
         statusMessage.classList.remove('hidden', 'bg-green-100', 'text-green-800');

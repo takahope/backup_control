@@ -24,6 +24,9 @@ function createMockDom() {
         checked: false,
         disabled: false,
         required: false,
+        setAttribute(name, value) {
+          this[name] = value;
+        },
         reset() {
           this.value = '';
           this.checked = false;
@@ -129,6 +132,7 @@ const {
   setChoiceSelectValue_,
   handleChoiceSelectChange_,
   resetChoiceSelect_,
+  handleSystemNameInput,
   editSystem,
   resetForm,
   handleFormSubmit
@@ -253,7 +257,55 @@ test('renderFormTargets 將本地與異地處置及佐證渲染為相同的固�
     );
     assert.match(selectHtml, /^<option value="備份系統執行Log" selected>/);
   });
+  assert.ok(rendered.includes('到期銷毀方法'), '表單應包含「到期銷毀方法」標籤');
+  assert.ok(rendered.includes('銷毀確認方式'), '表單應包含「銷毀確認方式」標籤');
+  assert.equal(rendered.includes('本地處置方法'), false, '不應再含有舊名詞「本地處置方法」');
+  assert.equal(rendered.includes('異地佐證種類'), false, '不應再含有舊名詞「異地佐證種類」');
   assert.match(rendered, /onchange="handleChoiceSelectChange_\(this\)"/);
+});
+
+test('renderTargetSetting 採用雙軌子面板視覺設計與去前綴化標籤', () => {
+  // 1. 啟用異地備份情境
+  const renderedOffsiteYes = renderTargetSetting({
+    targetKey: 'db',
+    targetName: '資料庫',
+    localFullValue: '1',
+    localFullUnit: '週',
+    localDiffValue: '1',
+    localDiffUnit: '天',
+    localRetention: '4',
+    localLocation: 'NAS-01',
+    localScheduleTime: '每日 00:00',
+    localDispositionMethod: '磁碟自動覆寫',
+    localEvidenceRequirements: '備份系統執行Log',
+    isOffsite: '是',
+    offsiteFreqValue: '1',
+    offsiteFreqUnit: '個月',
+    offsiteLocation: '國網中心',
+    offsiteRetention: '2',
+    offsiteScheduleTime: '每週日 03:00',
+    offsiteDispositionMethod: '磁碟自動覆寫',
+    offsiteEvidenceRequirements: '備份系統執行Log'
+  });
+
+  assert.ok(renderedOffsiteYes.includes('本地備份'), '應有本地備份軌道');
+  assert.ok(renderedOffsiteYes.includes('異地備份'), '應有異地備份軌道');
+  assert.ok(renderedOffsiteYes.includes('到期銷毀方法：'), '應顯示「到期銷毀方法」');
+  assert.ok(renderedOffsiteYes.includes('銷毀確認方式：'), '應顯示「銷毀確認方式」');
+  assert.equal(renderedOffsiteYes.includes('本地處置：'), false, '去前綴化：不應有「本地處置：」');
+  assert.equal(renderedOffsiteYes.includes('異地處置：'), false, '去前綴化：不應有「異地處置：」');
+  assert.equal(renderedOffsiteYes.includes('本地完整：'), false, '去前綴化：不應有「本地完整：」');
+
+  // 2. 未啟用異地備份情境
+  const renderedOffsiteNo = renderTargetSetting({
+    targetKey: 'source',
+    targetName: '原始碼',
+    isOffsite: '否'
+  });
+
+  assert.ok(renderedOffsiteNo.includes('本地備份'));
+  assert.ok(renderedOffsiteNo.includes('未啟用異地備份'), '未啟用異地時應呈現未啟用徽章');
+  assert.equal(renderedOffsiteNo.includes('異地週期：'), false);
 });
 
 test('選擇欄位可暫存歷史舊值並在重設時移除', () => {
@@ -293,7 +345,7 @@ test('異地佐證缺值時與本地共用備份系統執行Log預設值', () =>
     offsiteEvidenceRequirements: ''
   });
 
-  assert.match(rendered, /異地佐證：<\/span>備份系統執行Log/);
+  assert.match(rendered, /銷毀確認方式：<\/span>備份系統執行Log/);
   assert.equal(rendered.includes('磁帶消磁簽收單 / 雲端過期報表'), false);
 });
 
@@ -445,6 +497,7 @@ test('表單編輯回填歷史非標準字串之自動解析與正規化', () =>
   // 模擬載入含有非標準舊字串之歷史系統資料
   vm.runInContext(`appData = [{
     id: "sys-legacy",
+    systemId: "SYS-LEGACY-01",
     systemName: "歷史舊系統",
     systemLevel: "關鍵核心系統",
     managerName: "王小明",
@@ -493,6 +546,8 @@ test('表單編輯回填歷史非標準字串之自動解析與正規化', () =>
   editSystem('sys-legacy');
 
   // 1. 一般標的 (db - 週週期) 回填與正規化檢驗
+  assert.equal(currentMockDom.getElementById('submissionId').value, 'sys-legacy');
+  assert.equal(currentMockDom.getElementById('sourceSystemId').value, 'SYS-LEGACY-01');
   assert.equal(currentMockDom.getElementById('fullSchedWeekday_db').value, '日');
   assert.equal(currentMockDom.getElementById('fullSchedTime_db').value, '03:00');
   assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '每週日 03:00');
@@ -509,6 +564,22 @@ test('表單編輯回填歷史非標準字串之自動解析與正規化', () =>
   assert.equal(currentMockDom.getElementById('localSchedulePreview_log').textContent, '排程設定值: 每日 04:15');
   assert.equal(currentMockDom.getElementById('offsiteScheduleTime_log').value, '無');
   assert.equal(currentMockDom.getElementById('offsiteSchedulePreview_log').textContent, '排程設定值: 無');
+});
+
+test('編輯時改選另一系統會同步更新業務系統 ID', () => {
+  currentMockDom = createMockDom();
+  currentMockDom.querySelector = () => ({ value: 'systems' });
+  currentMockDom.getElementById('systemName').value = 'SYS-NEW-02 - 新系統';
+  currentMockDom.getElementById('sourceSystemId').value = 'SYS-OLD-01';
+  vm.runInContext(`systemOptionsData = [{ name: "SYS-NEW-02 - 新系統", level: "一般系統" }];`, sandbox);
+
+  handleSystemNameInput();
+
+  assert.equal(currentMockDom.getElementById('sourceSystemId').value, 'SYS-NEW-02');
+
+  currentMockDom.getElementById('systemName').value = '自訂新系統';
+  handleSystemNameInput();
+  assert.equal(currentMockDom.getElementById('sourceSystemId').value, '', '輸入不在來源清單的新系統時不得沿用舊 ID');
 });
 
 test('表單編輯回填雙軌排程完整回填與狀態同步', () => {
@@ -565,6 +636,7 @@ test('表單重置 resetForm 後所有標的與軌道恢復初始預設值', () 
   currentMockDom.getElementById('localScheduleTime_db').value = '非預設排程';
   currentMockDom.getElementById('offsiteScheduleTime_db').value = '每週五 03:00';
   currentMockDom.getElementById('fullSchedTime_log').value = '22:00';
+  currentMockDom.getElementById('sourceSystemId').value = 'SYS-RESET-01';
 
   resetForm();
 
@@ -583,6 +655,7 @@ test('表單重置 resetForm 後所有標的與軌道恢復初始預設值', () 
   assert.equal(currentMockDom.getElementById('fullSchedTime_log').value, '00:00');
   assert.equal(currentMockDom.getElementById('localScheduleTime_log').value, '每日 00:00');
   assert.equal(currentMockDom.getElementById('offsiteScheduleTime_log').value, '無');
+  assert.equal(currentMockDom.getElementById('sourceSystemId').value, '');
 });
 
 test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標的排程字串更新', () => {
@@ -596,6 +669,8 @@ test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標�
   currentMockDom.getElementById('localScheduleTime_db').value = '舊排程未同步';
   currentMockDom.getElementById('offsite_db_val_否').checked = true;
   currentMockDom.getElementById('offsite_db_val_否').value = '否';
+  currentMockDom.getElementById('submissionId').value = 'sub-001';
+  currentMockDom.getElementById('sourceSystemId').value = 'SYS-001';
 
   let submittedFormData = null;
   const run = {
@@ -614,6 +689,8 @@ test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標�
   assert.equal(prevented, true);
   // handleFormSubmit 內部應呼叫 syncTargetSchedule('db')，使 localScheduleTime_db 更新為最新格式
   assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '每日 05:45');
+  assert.equal(submittedFormData.id, 'sub-001');
+  assert.equal(submittedFormData.systemId, 'SYS-001');
   assert.equal(submittedFormData.targets[0].offsiteDispositionMethod, '無');
   assert.equal(submittedFormData.targets[0].offsiteEvidenceRequirements, '無');
 });

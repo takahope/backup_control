@@ -55,6 +55,8 @@ PRs should include:
 - Keep permission checks server-side for every data API, not only `doGet`.
 
 ## Incident & Change Log
+- 2026-09-23: 修復名詞升級後 assertSheetSchema_ 因嚴格字串比對拒絕未遷移試算表（處置/佐證舊表頭）導致前端顯示空狀態的缺陷。在後端引入 isHeaderCompatible_ 允許新舊表頭別名向下相容通過，確保舊版試算表免執行 runDataMigration 即可零停機平滑讀取；前端 loadDashboardData 補強 dashboardLoadError 狀態與重試入口，消除錯誤被靜默吞沒的隱患；全套 39 項測試全數通過。
+- 2026-09-23: 完成備份管制表「到期銷毀方法」與「銷毀確認方式」名詞升級與雙軌子面板視覺重構。後端升級 EXPECTED_HEADERS（12、13、19、20 欄）與歷程表頭，resolveHeaderIndices_ 與 parseTargetFromRow_ 完整支援新舊欄位別名相容，migrateSheetIfNeeded_ 平滑升級資料表；前端儀表板標的卡片重構為「本地（藍灰）／異地（紫羅蘭）」雙軌獨立子面板，內部標籤徹底去前綴化，未啟用異地時呈現優雅收合徽章；表單彈窗同步更新為直覺的到期銷毀方法與銷毀確認方式標籤；後端與生命週期測試全套 38 項全數通過。
 - 2026-09-23: 徹底移除前端 Index.html 的 localStorage 快取機制（isms_backup_records），載入時主動清除歷史殘留快取，建立 100% 以 Google Sheet 後端為唯一真實來源（Single Source of Truth）的無快取架構；後端加入 ensureSheetColumnsExist_ 格線邊界保護與 runAutoBackfillNow 免部署直驗工具，全套 21 項測試全數通過。
 - 2026-09-23: 實作第一層聚合前自動補填技術欄位 (submission_id, target_key) 機制。在 getDashboardData 建立 autoBackfillTechnicalKeysIfNeeded_ 輕量偵測旁路（Fast-path 0 寫入），當發現空白列時自動依同系統關聯性補齊 UUID 並推導 target_key，精準批次持久化至主表第 21、22 欄（不碰觸 1~20 欄業務資料），徹底杜絕同一系統標的被拆散或覆蓋的聚合錯誤；後端單元測試擴充至 9 項全數通過。
 - 2026-09-22: 修復每次載入頁面時觸發破壞性遷移導致後端資料錯位與資料洗成「無」的嚴重缺陷。徹底解耦 CQRS，從 `getDashboardData` 與 `deleteSubmission` 中移除 `checkAndSetHeaders`，主表與歷程表改為僅在全空時以 `ensureHeadersExist_` 寫入表頭；修正 `resolveHeaderIndices_` 缺漏欄位改為回傳 `-1` 徹底杜絕索引錯位；修復 `migrateSheetIfNeeded_` 在 26 欄工作表中的表頭比對判定；加強 `projectBusinessRow_` 異地資料與布林值保護；新增專用技術欄位安全補齊工具 `backfillMissingTechnicalKeys`；完成後端 5 項單元測試。
