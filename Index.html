@@ -138,22 +138,6 @@
         <form id="backupForm" onsubmit="handleFormSubmit(event)">
           <datalist id="systemOptionsList"></datalist>
           <datalist id="assetOptionsList"></datalist>
-          <datalist id="dispositionMethodList">
-            <option value="磁碟自動覆寫">
-            <option value="磁帶消磁銷毀">
-            <option value="實體銷毀">
-            <option value="封存至離線媒體">
-          </datalist>
-          <datalist id="evidenceList_local">
-            <option value="備份系統執行Log">
-            <option value="資料庫備份歷程表">
-            <option value="排程備份通知信件">
-          </datalist>
-          <datalist id="evidenceList_offsite">
-            <option value="磁帶消磁簽收單 / 雲端過期報表">
-            <option value="異地同步執行Log">
-            <option value="雲端存取稽核報告">
-          </datalist>
 
           <!-- 隱藏的 ID 欄位，用於判斷是新增還是更新 -->
           <input type="hidden" id="systemId" value="">
@@ -221,6 +205,58 @@
   </main>
 
   <script>
+    const DISPOSITION_METHOD_OPTIONS = ['磁碟自動覆寫', '人工手動覆蓋'];
+    const EVIDENCE_REQUIREMENT_OPTIONS = ['備份系統執行Log', '備份檔名確認'];
+
+    function renderChoiceSelectHtml_(id, options, className) {
+      const optionHtml = options.map(function(value, index) {
+        return `<option value="${value}"${index === 0 ? ' selected' : ''}>${value}</option>`;
+      }).join('');
+      return `<select id="${id}" class="${className}" onchange="handleChoiceSelectChange_(this)">${optionHtml}</select>`;
+    }
+
+    function removeLegacyChoiceOptions_(selectEl) {
+      if (!selectEl || typeof selectEl.querySelectorAll !== 'function') return;
+      Array.from(selectEl.querySelectorAll('option[data-legacy-option="true"]')).forEach(function(option) {
+        option.remove();
+      });
+    }
+
+    function setChoiceSelectValue_(selectEl, rawValue, fallbackValue) {
+      if (!selectEl) return;
+      removeLegacyChoiceOptions_(selectEl);
+
+      const value = String(rawValue || '').trim();
+      const fallback = String(fallbackValue || '').trim();
+      const hasKnownOption = Array.from(selectEl.options || []).some(function(option) {
+        return option.value === value;
+      });
+
+      if (value && value !== '無' && !hasKnownOption) {
+        const legacyOption = document.createElement('option');
+        legacyOption.value = value;
+        legacyOption.textContent = value + '（舊值）';
+        legacyOption.dataset.legacyOption = 'true';
+        selectEl.appendChild(legacyOption);
+      }
+      selectEl.value = value && value !== '無' ? value : fallback;
+    }
+
+    function handleChoiceSelectChange_(selectEl) {
+      if (!selectEl) return;
+      const selectedOption = Array.from(selectEl.options || []).find(function(option) {
+        return option.value === selectEl.value;
+      });
+      if (selectedOption && selectedOption.dataset && selectedOption.dataset.legacyOption === 'true') return;
+      removeLegacyChoiceOptions_(selectEl);
+    }
+
+    function resetChoiceSelect_(selectEl, defaultValue) {
+      if (!selectEl) return;
+      removeLegacyChoiceOptions_(selectEl);
+      selectEl.value = defaultValue;
+    }
+
     // --- 排程時間標準語法核心引擎 ---
     function formatTrackSchedule(unit, time, options = {}) {
       const u = String(unit || '天').trim();
@@ -590,7 +626,7 @@
       const offsiteRetention = isLogTarget ? '不適用' : (offsiteEnabled ? formatRetention(target.offsiteRetention) : '無');
       const offsiteSchedule = offsiteEnabled ? safeText(target.offsiteScheduleTime, '每日 00:00') : '無';
       const offsiteDisp = offsiteEnabled ? safeText(target.offsiteDispositionMethod, '磁碟自動覆寫') : '無';
-      const offsiteEvid = offsiteEnabled ? safeText(target.offsiteEvidenceRequirements, '磁帶消磁簽收單 / 雲端過期報表') : '無';
+      const offsiteEvid = offsiteEnabled ? safeText(target.offsiteEvidenceRequirements, '備份系統執行Log') : '無';
 
       return `
         <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2">
@@ -1146,8 +1182,8 @@
           // 本地處置方法與佐證回填
           const elLocalDisp = document.getElementById(`localDispositionMethod_${tid}`);
           const elLocalEvid = document.getElementById(`localEvidenceRequirements_${tid}`);
-          if (elLocalDisp) elLocalDisp.value = tData.localDispositionMethod || '磁碟自動覆寫';
-          if (elLocalEvid) elLocalEvid.value = tData.localEvidenceRequirements || '備份系統執行Log';
+          setChoiceSelectValue_(elLocalDisp, tData.localDispositionMethod, '磁碟自動覆寫');
+          setChoiceSelectValue_(elLocalEvid, tData.localEvidenceRequirements, '備份系統執行Log');
 
           // 異地存放設定
           if (tData.isOffsite === '是') {
@@ -1165,8 +1201,8 @@
             if (freqUnitEl) freqUnitEl.value = tData.offsiteFreqUnit;
             if (locEl) locEl.value = tData.offsiteLocation;
             if (retEl) retEl.value = tData.offsiteRetention;
-            if (elOffDisp) elOffDisp.value = tData.offsiteDispositionMethod || '磁碟自動覆寫';
-            if (elOffEvid) elOffEvid.value = tData.offsiteEvidenceRequirements || '磁帶消磁簽收單 / 雲端過期報表';
+            setChoiceSelectValue_(elOffDisp, tData.offsiteDispositionMethod, '磁碟自動覆寫');
+            setChoiceSelectValue_(elOffEvid, tData.offsiteEvidenceRequirements, '備份系統執行Log');
 
             const offParsed = parseScheduleString(tData.offsiteScheduleTime, tData.offsiteFreqUnit || '天');
             const owEl = document.getElementById(`offsiteSchedWeekday_${tid}`);
@@ -1187,8 +1223,8 @@
             toggleOffsite(tid, false);
             const elOffDisp = document.getElementById(`offsiteDispositionMethod_${tid}`);
             const elOffEvid = document.getElementById(`offsiteEvidenceRequirements_${tid}`);
-            if (elOffDisp) elOffDisp.value = '磁碟自動覆寫';
-            if (elOffEvid) elOffEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
+            resetChoiceSelect_(elOffDisp, '磁碟自動覆寫');
+            resetChoiceSelect_(elOffEvid, '備份系統執行Log');
 
             const owEl = document.getElementById(`offsiteSchedWeekday_${tid}`);
             const omEl = document.getElementById(`offsiteSchedMonth_${tid}`);
@@ -1270,8 +1306,8 @@
         const elLocalDisp = document.getElementById(`localDispositionMethod_${t.id}`);
         const elLocalEvid = document.getElementById(`localEvidenceRequirements_${t.id}`);
         if (elLocalSched) elLocalSched.value = '每日 00:00';
-        if (elLocalDisp) elLocalDisp.value = '磁碟自動覆寫';
-        if (elLocalEvid) elLocalEvid.value = '備份系統執行Log';
+        resetChoiceSelect_(elLocalDisp, '磁碟自動覆寫');
+        resetChoiceSelect_(elLocalEvid, '備份系統執行Log');
 
         const elOffSched = document.getElementById(`offsiteScheduleTime_${t.id}`);
         const elOffDisp = document.getElementById(`offsiteDispositionMethod_${t.id}`);
@@ -1279,8 +1315,8 @@
         if (elOffSched) elOffSched.value = '無';
         const elOffPrev = document.getElementById(`offsiteSchedulePreview_${t.id}`);
         if (elOffPrev) elOffPrev.textContent = '排程設定值: 無';
-        if (elOffDisp) elOffDisp.value = '磁碟自動覆寫';
-        if (elOffEvid) elOffEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
+        resetChoiceSelect_(elOffDisp, '磁碟自動覆寫');
+        resetChoiceSelect_(elOffEvid, '備份系統執行Log');
       });
     }
 
@@ -1327,11 +1363,11 @@
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
-                <input type="text" list="dispositionMethodList" id="localDispositionMethod_${target.id}" value="磁碟自動覆寫" placeholder="請選擇或輸入處置方法" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                ${renderChoiceSelectHtml_(`localDispositionMethod_${target.id}`, DISPOSITION_METHOD_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地佐證種類 <span class="text-red-500">*</span></label>
-                <input type="text" list="evidenceList_local" id="localEvidenceRequirements_${target.id}" value="備份系統執行Log" placeholder="請選擇或輸入佐證種類" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                ${renderChoiceSelectHtml_(`localEvidenceRequirements_${target.id}`, EVIDENCE_REQUIREMENT_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
             </div>
           `;
@@ -1386,11 +1422,11 @@
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地處置方法 <span class="text-red-500">*</span></label>
-                <input type="text" list="dispositionMethodList" id="localDispositionMethod_${target.id}" value="磁碟自動覆寫" placeholder="請選擇或輸入處置方法" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                ${renderChoiceSelectHtml_(`localDispositionMethod_${target.id}`, DISPOSITION_METHOD_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地佐證種類 <span class="text-red-500">*</span></label>
-                <input type="text" list="evidenceList_local" id="localEvidenceRequirements_${target.id}" value="備份系統執行Log" placeholder="請選擇或輸入佐證種類" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500">
+                ${renderChoiceSelectHtml_(`localEvidenceRequirements_${target.id}`, EVIDENCE_REQUIREMENT_OPTIONS, 'block w-full rounded-md border-gray-300 shadow-sm p-2 border bg-white focus:ring-blue-500')}
               </div>
             </div>
           `;
@@ -1464,11 +1500,11 @@
                     </div>
                     <div>
                       <label class="block text-sm font-medium text-purple-800 mb-1">異地處置方法 <span class="text-red-500">*</span></label>
-                      <input type="text" list="dispositionMethodList" id="offsiteDispositionMethod_${target.id}" value="磁碟自動覆寫" placeholder="請選擇或輸入處置方法" class="block w-full rounded-md border-purple-300 shadow-sm p-2 border focus:ring-purple-500">
+                      ${renderChoiceSelectHtml_(`offsiteDispositionMethod_${target.id}`, DISPOSITION_METHOD_OPTIONS, 'block w-full rounded-md border-purple-300 shadow-sm p-2 border bg-white focus:ring-purple-500')}
                     </div>
                     <div>
                       <label class="block text-sm font-medium text-purple-800 mb-1">異地佐證種類 <span class="text-red-500">*</span></label>
-                      <input type="text" list="evidenceList_offsite" id="offsiteEvidenceRequirements_${target.id}" value="磁帶消磁簽收單 / 雲端過期報表" placeholder="請選擇或輸入佐證種類" class="block w-full rounded-md border-purple-300 shadow-sm p-2 border focus:ring-purple-500">
+                      ${renderChoiceSelectHtml_(`offsiteEvidenceRequirements_${target.id}`, EVIDENCE_REQUIREMENT_OPTIONS, 'block w-full rounded-md border-purple-300 shadow-sm p-2 border bg-white focus:ring-purple-500')}
                     </div>
                   </div>
                 </div>
@@ -1554,8 +1590,10 @@
           if (elLocalSched.type !== 'hidden') elLocalSched.required = false;
           elLocalSched.value = '每日 00:00';
         }
-        if (elLocalDisp) { elLocalDisp.required = false; elLocalDisp.value = '磁碟自動覆寫'; }
-        if (elLocalEvid) { elLocalEvid.required = false; elLocalEvid.value = '備份系統執行Log'; }
+        if (elLocalDisp) elLocalDisp.required = false;
+        if (elLocalEvid) elLocalEvid.required = false;
+        resetChoiceSelect_(elLocalDisp, '磁碟自動覆寫');
+        resetChoiceSelect_(elLocalEvid, '備份系統執行Log');
         
         document.querySelector(`input[name="offsite_${targetId}"][value="否"]`).checked = true;
         toggleOffsite(targetId, false);
@@ -1609,8 +1647,8 @@
         if (offSched) offSched.value = '無';
         const offPrev = document.getElementById(`offsiteSchedulePreview_${targetId}`);
         if (offPrev) offPrev.textContent = '排程設定值: 無';
-        if (offDisp) offDisp.value = '磁碟自動覆寫';
-        if (offEvid) offEvid.value = '磁帶消磁簽收單 / 雲端過期報表';
+        resetChoiceSelect_(offDisp, '磁碟自動覆寫');
+        resetChoiceSelect_(offEvid, '備份系統執行Log');
       }
     }
 
@@ -1677,7 +1715,7 @@
           offsiteRetention: isOffsite === '是' ? document.getElementById(`offsiteRet_${t.id}`).value : '',
           offsiteScheduleTime: isOffsite === '是' ? (offsiteScheduleEl ? (offsiteScheduleEl.value.trim() || '每日 00:00') : '每日 00:00') : '無',
           offsiteDispositionMethod: isOffsite === '是' ? (offsiteDispEl ? (offsiteDispEl.value.trim() || '磁碟自動覆寫') : '磁碟自動覆寫') : '無',
-          offsiteEvidenceRequirements: isOffsite === '是' ? (offsiteEvidEl ? (offsiteEvidEl.value.trim() || '磁帶消磁簽收單 / 雲端過期報表') : '磁帶消磁簽收單 / 雲端過期報表') : '無'
+          offsiteEvidenceRequirements: isOffsite === '是' ? (offsiteEvidEl ? (offsiteEvidEl.value.trim() || '備份系統執行Log') : '備份系統執行Log') : '無'
         };
       });
 

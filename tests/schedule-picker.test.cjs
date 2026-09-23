@@ -15,7 +15,7 @@ function createMockDom() {
 
   function getOrCreate(id) {
     if (!elements.has(id)) {
-      elements.set(id, {
+      const element = {
         id,
         value: '',
         textContent: '',
@@ -28,8 +28,24 @@ function createMockDom() {
           this.value = '';
           this.checked = false;
         },
+        options: [],
+        appendChild(option) {
+          option.parentNode = this;
+          option.remove = function() {
+            if (!this.parentNode) return;
+            const index = this.parentNode.options.indexOf(this);
+            if (index !== -1) this.parentNode.options.splice(index, 1);
+          };
+          this.options.push(option);
+          return option;
+        },
         querySelector: (sel) => getOrCreate('mock_child_' + sel),
-        querySelectorAll: () => [],
+        querySelectorAll(selector) {
+          if (selector === 'option[data-legacy-option="true"]') {
+            return this.options.filter(option => option.dataset && option.dataset.legacyOption === 'true');
+          }
+          return [];
+        },
         classList: {
           _classes: new Set(),
           add(c) { this._classes.add(c); },
@@ -43,7 +59,8 @@ function createMockDom() {
           },
           contains(c) { return this._classes.has(c); }
         }
-      });
+      };
+      elements.set(id, element);
     }
     return elements.get(id);
   }
@@ -86,6 +103,7 @@ const sandbox = {
   window: { scrollTo: () => {} },
   document: {
     addEventListener: () => {},
+    createElement: () => ({ value: '', textContent: '', dataset: {}, parentNode: null }),
     getElementById: (id) => currentMockDom ? currentMockDom.getElementById(id) : null,
     querySelector: (s) => currentMockDom ? currentMockDom.querySelector(s) : null,
     querySelectorAll: (s) => currentMockDom ? currentMockDom.querySelectorAll(s) : []
@@ -106,6 +124,11 @@ const {
   updateSchedulePickerUI,
   updateDiffPickerVisibility,
   syncTargetSchedule,
+  renderTargetSetting,
+  renderFormTargets,
+  setChoiceSelectValue_,
+  handleChoiceSelectChange_,
+  resetChoiceSelect_,
   editSystem,
   resetForm,
   handleFormSubmit
@@ -198,6 +221,80 @@ test('renderSchedulePickerTrackHtml 產出符合規範的 DOM 元件結構', () 
   const offsiteHtml = renderSchedulePickerTrackHtml('db', 'offsite', '異地排程:');
   assert.ok(offsiteHtml.includes('id="offsiteSchedulePicker_db"'), '應包含異地軌容器 ID');
   assert.ok(offsiteHtml.includes('text-purple-700'), '異地軌應有紫色樣式');
+});
+
+test('renderFormTargets 將本地與異地處置及佐證渲染為相同的固定下拉選單', () => {
+  currentMockDom = createMockDom();
+  renderFormTargets();
+  const rendered = currentMockDom.getElementById('targetsContainer').innerHTML;
+
+  function getSelectHtml(id) {
+    const match = rendered.match(new RegExp(`<select[^>]*id="${id}"[^>]*>([\\s\\S]*?)<\\/select>`));
+    assert.ok(match, `${id} 必須使用 select 元件`);
+    return match[1];
+  }
+
+  const localDisposition = getSelectHtml('localDispositionMethod_db');
+  const offsiteDisposition = getSelectHtml('offsiteDispositionMethod_db');
+  const localEvidence = getSelectHtml('localEvidenceRequirements_db');
+  const offsiteEvidence = getSelectHtml('offsiteEvidenceRequirements_db');
+
+  [localDisposition, offsiteDisposition].forEach(selectHtml => {
+    assert.deepEqual(
+      Array.from(selectHtml.matchAll(/<option value="([^"]+)"/g), match => match[1]),
+      ['磁碟自動覆寫', '人工手動覆蓋']
+    );
+    assert.match(selectHtml, /^<option value="磁碟自動覆寫" selected>/);
+  });
+  [localEvidence, offsiteEvidence].forEach(selectHtml => {
+    assert.deepEqual(
+      Array.from(selectHtml.matchAll(/<option value="([^"]+)"/g), match => match[1]),
+      ['備份系統執行Log', '備份檔名確認']
+    );
+    assert.match(selectHtml, /^<option value="備份系統執行Log" selected>/);
+  });
+  assert.match(rendered, /onchange="handleChoiceSelectChange_\(this\)"/);
+});
+
+test('選擇欄位可暫存歷史舊值並在重設時移除', () => {
+  assert.equal(typeof setChoiceSelectValue_, 'function');
+  assert.equal(typeof resetChoiceSelect_, 'function');
+
+  currentMockDom = createMockDom();
+  const select = currentMockDom.getElementById('offsiteEvidenceRequirements_db');
+  select.appendChild({ value: '備份系統執行Log', textContent: '備份系統執行Log', dataset: {} });
+  select.appendChild({ value: '備份檔名確認', textContent: '備份檔名確認', dataset: {} });
+
+  setChoiceSelectValue_(select, '磁帶消磁簽收單 / 雲端過期報表', '備份系統執行Log');
+  assert.equal(select.value, '磁帶消磁簽收單 / 雲端過期報表');
+  assert.equal(select.options.length, 3);
+  assert.equal(select.options[2].dataset.legacyOption, 'true');
+
+  handleChoiceSelectChange_(select);
+  assert.equal(select.options.length, 3, '仍選取歷史值時不得移除舊值選項');
+
+  select.value = '備份檔名確認';
+  handleChoiceSelectChange_(select);
+  assert.equal(select.value, '備份檔名確認');
+  assert.deepEqual(select.options.map(option => option.value), ['備份系統執行Log', '備份檔名確認']);
+
+  setChoiceSelectValue_(select, '磁帶消磁簽收單 / 雲端過期報表', '備份系統執行Log');
+
+  resetChoiceSelect_(select, '備份系統執行Log');
+  assert.equal(select.value, '備份系統執行Log');
+  assert.deepEqual(select.options.map(option => option.value), ['備份系統執行Log', '備份檔名確認']);
+});
+
+test('異地佐證缺值時與本地共用備份系統執行Log預設值', () => {
+  const rendered = renderTargetSetting({
+    targetKey: 'db',
+    targetName: '資料庫',
+    isOffsite: '是',
+    offsiteEvidenceRequirements: ''
+  });
+
+  assert.match(rendered, /異地佐證：<\/span>備份系統執行Log/);
+  assert.equal(rendered.includes('磁帶消磁簽收單 / 雲端過期報表'), false);
 });
 
 test('updateSchedulePickerUI 依週期單位動態切換各欄位顯示與隱藏', () => {
@@ -497,13 +594,26 @@ test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標�
   // 模擬使用者直接變更 time input 尚未 trigger 任何 event
   currentMockDom.getElementById('fullSchedTime_db').value = '05:45';
   currentMockDom.getElementById('localScheduleTime_db').value = '舊排程未同步';
+  currentMockDom.getElementById('offsite_db_val_否').checked = true;
+  currentMockDom.getElementById('offsite_db_val_否').value = '否';
+
+  let submittedFormData = null;
+  const run = {
+    withSuccessHandler() { return this; },
+    withFailureHandler() { return this; },
+    submitData(formData) { submittedFormData = formData; }
+  };
+  sandbox.google = { script: { run } };
 
   let prevented = false;
   handleFormSubmit({
     preventDefault: () => { prevented = true; }
   });
+  delete sandbox.google;
 
   assert.equal(prevented, true);
   // handleFormSubmit 內部應呼叫 syncTargetSchedule('db')，使 localScheduleTime_db 更新為最新格式
   assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '每日 05:45');
+  assert.equal(submittedFormData.targets[0].offsiteDispositionMethod, '無');
+  assert.equal(submittedFormData.targets[0].offsiteEvidenceRequirements, '無');
 });
