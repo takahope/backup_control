@@ -27,6 +27,10 @@ exports.targetNameToKey_ = targetNameToKey_;
 exports.projectBusinessRow_ = projectBusinessRow_;
 exports.migrateSheetIfNeeded_ = migrateSheetIfNeeded_;
 exports.backfillMissingTechnicalKeys = backfillMissingTechnicalKeys;
+exports.ensureTechnicalHeadersExist_ = ensureTechnicalHeadersExist_;
+exports.autoBackfillTechnicalKeysIfNeeded_ = autoBackfillTechnicalKeysIfNeeded_;
+exports.ensureSheetColumnsExist_ = ensureSheetColumnsExist_;
+exports.runAutoBackfillNow = runAutoBackfillNow;
 `;
 
 const mod = {};
@@ -232,3 +236,159 @@ test('backfillMissingTechnicalKeys 正確為同一系統補齊相同 UUID 並依
   assert.equal(writtenValues[2][20], 'existing-uuid-002', '既有 UUID 必須保留');
   assert.equal(writtenValues[2][21], 'source', '既有 target_key 必須保留');
 });
+
+test('autoBackfillTechnicalKeysIfNeeded_ 命中 Fast-path 時絕不執行任何寫入操作', () => {
+  let writeCalled = false;
+  const mockSheet = {
+    getRange: () => ({
+      setValues: () => { writeCalled = true; },
+      setValue: () => { writeCalled = true; }
+    })
+  };
+
+  const completeRows = [
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '資料庫', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'uuid-1', 'db'],
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '系統日誌檔', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'uuid-1', 'log']
+  ];
+
+  const indices = mod.resolveHeaderIndices_(mod.EXPECTED_HEADERS);
+  const result = mod.autoBackfillTechnicalKeysIfNeeded_(mockSheet, completeRows, indices);
+
+  assert.equal(writeCalled, false, '所有欄位齊全時絕不可觸發 setValues 寫入');
+  assert.equal(result.length, 2);
+  assert.equal(result[0][20], 'uuid-1');
+});
+
+test('autoBackfillTechnicalKeysIfNeeded_ 正確為同一系統的多標的補齊相同 UUID 與 target_key 並批次寫回', () => {
+  let writtenRange = null;
+  let writtenData = null;
+
+  const mockSheet = {
+    getRange: (r, c, numR, numC) => {
+      writtenRange = { r, c, numR, numC };
+      return {
+        setValues: (vals) => { writtenData = vals; }
+      };
+    }
+  };
+
+  const missingRows = [
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '資料庫', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '系統日誌檔', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+  ];
+
+  const indices = mod.resolveHeaderIndices_(mod.EXPECTED_HEADERS);
+  const result = mod.autoBackfillTechnicalKeysIfNeeded_(mockSheet, missingRows, indices);
+
+  assert.ok(writtenData !== null, '必須批次寫回補齊之數值');
+  assert.equal(writtenRange.c, 21, '必須寫回第 21 欄起算');
+  assert.equal(writtenRange.numC, 2, '必須寫回 2 欄寬度 (submission_id, target_key)');
+  assert.ok(result[0][20].length > 0, 'submission_id 必須已補齊');
+  assert.equal(result[0][20], result[1][20], '同一系統之多標的必須分配相同 UUID');
+  assert.equal(result[0][21], 'db', '資料庫標的應補齊為 db');
+  assert.equal(result[1][21], 'log', '系統日誌檔標的應補齊為 log');
+});
+
+test('autoBackfillTechnicalKeysIfNeeded_ 部分缺失時正確繼承同系統既有 UUID', () => {
+  let writtenData = null;
+  const mockSheet = {
+    getRange: () => ({
+      setValues: (vals) => { writtenData = vals; }
+    })
+  };
+
+  const partialRows = [
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '資料庫', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'existing-uuid-999', 'db'],
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '原始碼', '張三', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+  ];
+
+  const indices = mod.resolveHeaderIndices_(mod.EXPECTED_HEADERS);
+  const result = mod.autoBackfillTechnicalKeysIfNeeded_(mockSheet, partialRows, indices);
+
+  assert.equal(result[1][20], 'existing-uuid-999', '空白列必須繼承同系統既有的 UUID');
+  assert.equal(result[1][21], 'source', '原始碼標的應補齊為 source');
+});
+
+test('整合驗證：缺失技術欄位時 getDashboardData 能自動補齊並完整保留同系統所有標的', () => {
+  let sheetWrites = [];
+  const mockRows = [
+    ['2026/9/19 10:00:00', 'SYS-01', 'HIS系統', '關鍵核心系統', '資料庫', '張三', '1週', '1天', '4', 'NAS-01', '每日 00:00', '磁碟自動覆寫', 'Log', '否', '', '', '', '無', '無', '無', '', ''],
+    ['2026/9/19 10:00:01', 'SYS-01', 'HIS系統', '關鍵核心系統', '系統日誌檔', '張三', '', '', '保存 6 月', 'NAS-01', '每日 00:00', '磁碟自動覆寫', 'Log', '否', '', '', '', '無', '無', '無', '', '']
+  ];
+
+  const mockSheet = {
+    getLastRow: () => 3,
+    getLastColumn: () => 22,
+    getMaxColumns: () => 22,
+    getRange: (r, c, numR, numC) => {
+      if (r === 1) {
+        return { getValues: () => [mod.EXPECTED_HEADERS] };
+      }
+      return {
+        getValues: () => mockRows,
+        setValues: (vals) => { sheetWrites.push(vals); }
+      };
+    }
+  };
+
+  const mockSs = {
+    getSheetByName: (name) => (name === '備份管制' ? mockSheet : null)
+  };
+
+  const SpreadsheetApp = {
+    getActiveSpreadsheet: () => mockSs
+  };
+
+  const Session = {
+    getScriptTimeZone: () => 'GMT+8',
+    getActiveUser: () => ({ getEmail: () => 'admin@example.com' })
+  };
+
+  let uuidCounter = 1;
+  const Utilities = {
+    getUuid: () => 'auto-uuid-' + (uuidCounter++)
+  };
+
+  // 讀取最新 codeJsContent
+  const currentCodeJs = fs.readFileSync(path.join(__dirname, '..', 'code.js'), 'utf8');
+  const fnSrc = `
+    ${currentCodeJs}
+    // 覆寫權限檢查以利單元測試
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return getDashboardData();
+  `;
+  const runner = new Function('SpreadsheetApp', 'Session', 'Utilities', 'console', fnSrc);
+  const resp = runner(SpreadsheetApp, Session, Utilities, console);
+
+  assert.equal(resp.success, true, 'getDashboardData 必須成功');
+  assert.equal(resp.data.length, 1, '應聚合為 1 個系統卡片');
+  assert.equal(resp.data[0].systemName, 'HIS系統');
+  assert.equal(resp.data[0].targets.length, 2, '該系統卡片底下的 targets 必須包含全部 2 個標的（資料庫與系統日誌檔），絕不可遺漏');
+  assert.equal(resp.data[0].targets[0].targetName, '資料庫');
+  assert.equal(resp.data[0].targets[1].targetName, '系統日誌檔');
+});
+
+test('ensureSheetColumnsExist_ 在格線不足 22 欄時正確擴展欄位，超過時不重複插入', () => {
+  let inserted = null;
+  const mockSheetSmall = {
+    getMaxColumns: () => 20,
+    insertColumnsAfter: (pos, count) => {
+      inserted = { pos, count };
+    }
+  };
+
+  mod.ensureSheetColumnsExist_(mockSheetSmall, 22);
+  assert.deepEqual(inserted, { pos: 20, count: 2 }, '必須在第 20 欄後插入 2 欄');
+
+  let insertedBig = null;
+  const mockSheetBig = {
+    getMaxColumns: () => 26,
+    insertColumnsAfter: (pos, count) => {
+      insertedBig = { pos, count };
+    }
+  };
+
+  mod.ensureSheetColumnsExist_(mockSheetBig, 22);
+  assert.equal(insertedBig, null, '欄數已達 26 欄時絕不可重複插入欄位');
+});
+

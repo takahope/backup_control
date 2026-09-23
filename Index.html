@@ -534,9 +534,8 @@
       if (offsitePreview) offsitePreview.textContent = `排程設定值: ${offsiteStr}`;
     }
 
-    // --- 狀態管理 (使用 LocalStorage 模擬後端資料庫) ---
-    const STORAGE_KEY = 'isms_backup_records';
-    let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    // --- 狀態管理（Single Source of Truth：完全以 Google Sheet 後端為主，不使用本地快取）---
+    let appData = [];
     let systemOptionsData = [];
     let assetOptionsData = [];
     let dashboardLoadProgress = 0;
@@ -631,6 +630,9 @@
 
     // --- 初始化應用程式 ---
     document.addEventListener('DOMContentLoaded', () => {
+      try {
+        localStorage.removeItem('isms_backup_records');
+      } catch (e) {}
       renderFormTargets();
       loadAssetOptions();
       loadDashboardData({ showProgress: true });
@@ -786,7 +788,7 @@
       return true;
     }
 
-    // --- 優先從後端讀取資料；若失敗則回退到本地快取 ---
+    // --- 每次均直接從後端 Google Sheet 讀取最新資料，不使用 localStorage 快取 ---
     function loadDashboardData(options = {}) {
       const showProgress = Boolean(options.showProgress);
       if (showProgress) startDashboardLoading();
@@ -796,17 +798,20 @@
           .withSuccessHandler(function(response) {
             if (response && response.success && Array.isArray(response.data)) {
               appData = response.data;
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
             } else {
-              appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+              appData = [];
+              const errMsg = (response && response.message) ? response.message : '後端讀取資料失敗。';
+              console.warn('[loadDashboardData] 後端回傳失敗：', errMsg);
             }
             if (showProgress) {
               finishDashboardLoading();
             }
             renderDashboard();
           })
-          .withFailureHandler(function() {
-            appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+          .withFailureHandler(function(error) {
+            appData = [];
+            const errMsg = (error && error.message) ? error.message : '連線逾時或後端拋出例外。';
+            console.error('[loadDashboardData] RPC 呼叫失敗：', errMsg);
             if (showProgress) {
               finishDashboardLoading();
             }
@@ -814,7 +819,8 @@
           })
           .getDashboardData();
       } else {
-        appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+        // 本地純靜態瀏覽預覽環境
+        appData = [];
         if (showProgress) {
           finishDashboardLoading();
         }
@@ -1022,7 +1028,6 @@
           .withSuccessHandler(function(response) {
             if (response && response.success === true) {
               appData = appData.filter(s => s.id !== id);
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
               renderDashboard();
               alert(response.message || '系統備份設定已成功刪除並封存！');
             } else {
@@ -1041,9 +1046,8 @@
         // 本地模擬刪除
         setTimeout(() => {
           appData = appData.filter(s => s.id !== id);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
           renderDashboard();
-          alert('（本地測試環境）設定已刪除並模擬封存。');
+          alert('（本地測試環境）設定已刪除。');
         }, 300);
       }
     }
@@ -1685,21 +1689,6 @@
         targets: targetsData
       };
 
-      // --- 本地模擬更新邏輯 ---
-      const localId = systemId || ('local_' + Date.now().toString());
-      const localRecord = Object.assign({}, formData, { id: localId });
-      if (systemId) {
-        // 更新模式
-        const index = appData.findIndex(s => s.id === systemId);
-        if(index !== -1) appData[index] = localRecord;
-      } else {
-        // 新增模式
-        appData.push(localRecord);
-      }
-      
-      // 儲存至本地端，確保重新整理後資料還在
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
-
       // --- 呼叫後端 Google Apps Script (如果存在) ---
       if (typeof google !== 'undefined' && google.script) {
         google.script.run
@@ -1708,24 +1697,25 @@
               handleError((response && response.message) ? response.message : '後端儲存失敗。');
               return;
             }
-            if (!systemId && response && response.submissionId) {
-              const idx = appData.findIndex(s => s.id === localId);
-              if (idx !== -1) {
-                appData[idx].id = response.submissionId;
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
-              }
-            }
-            handleSuccess(response.message || '資料已成功寫入後端與本地！');
+            handleSuccess(response.message || '資料已成功儲存至試算表！');
           })
           .withFailureHandler(function(error) {
             const errMsg = (error && error.message)
               ? ('後端呼叫失敗：' + error.message)
-              : '連線失敗，但資料已暫存於本地。';
+              : '連線失敗，請檢查網路連線或稍後再試。';
             handleError(errMsg);
           })
           .submitData(formData);
       } else {
-        // 如果是在本地測試，沒有 google.script，直接模擬成功
+        // 本地純預覽測試環境（無 GAS 環境）
+        const localId = systemId || ('local_' + Date.now().toString());
+        const localRecord = Object.assign({}, formData, { id: localId });
+        if (systemId) {
+          const index = appData.findIndex(s => s.id === systemId);
+          if (index !== -1) appData[index] = localRecord;
+        } else {
+          appData.push(localRecord);
+        }
         setTimeout(() => {
           handleSuccess(systemId ? '系統設定已成功更新！' : '資料已成功新增！');
         }, 500);

@@ -587,6 +587,187 @@ function deleteSubmission(submissionId) {
   }
 }
 
+/**
+ * 確保工作表實體格線具備足夠欄數，避免 getRange 拋出坐標無效錯誤
+ */
+function ensureSheetColumnsExist_(sheet, requiredColumns) {
+  if (!sheet || typeof sheet.getMaxColumns !== 'function') return;
+  const maxCols = sheet.getMaxColumns();
+  if (maxCols < requiredColumns && typeof sheet.insertColumnsAfter === 'function') {
+    sheet.insertColumnsAfter(maxCols, requiredColumns - maxCols);
+  }
+}
+
+/**
+ * 確保工作表表頭包含第 21 欄 (submission_id) 與第 22 欄 (target_key)
+ */
+function ensureTechnicalHeadersExist_(sheet, indices) {
+  if (!sheet) return;
+  ensureSheetColumnsExist_(sheet, EXPECTED_HEADERS.length);
+  const lastCol = sheet.getLastColumn();
+  const width = Math.max(lastCol, EXPECTED_HEADERS.length);
+  const headerRow = sheet.getRange(1, 1, 1, width).getValues()[0];
+  let subIdx = headerRow.indexOf('submission_id');
+  let tgtIdx = headerRow.indexOf('target_key');
+
+  if (subIdx === -1) {
+    subIdx = 20; // 0-indexed, 第 21 欄
+    sheet.getRange(1, 21).setValue('submission_id');
+  }
+  if (tgtIdx === -1) {
+    tgtIdx = 21; // 0-indexed, 第 22 欄
+    sheet.getRange(1, 22).setValue('target_key');
+  }
+  indices.submissionId = subIdx;
+  indices.targetKey = tgtIdx;
+}
+
+/**
+ * 管理員/除錯專用：立即在 GAS 編輯器執行技術欄位補填並印出診斷日誌
+ * 作用：完全避開 Web App 快取與 /exec 版本未更新之問題，直接在後端試算表生效
+ */
+function runAutoBackfillNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) throw new Error("找不到工作表「" + SHEET_NAME + "」");
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    const msg = "工作表中無資料列需補齊。";
+    console.log(msg);
+    return msg;
+  }
+
+  ensureSheetColumnsExist_(sheet, EXPECTED_HEADERS.length);
+
+  const headerValues = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const indices = resolveHeaderIndices_(headerValues);
+  const colCount = Math.max(sheet.getLastColumn(), EXPECTED_HEADERS.length);
+  const values = sheet.getRange(2, 1, lastRow - 1, colCount).getValues();
+
+  console.log(`[runAutoBackfillNow] 開始診斷：總資料列 ${values.length} 筆，表頭 submissionId 索引: ${indices.submissionId}, targetKey 索引: ${indices.targetKey}`);
+
+  autoBackfillTechnicalKeysIfNeeded_(sheet, values, indices);
+
+  console.log(`[runAutoBackfillNow] 補填完成，請檢查試算表第 21 與 22 欄。`);
+  return `執行完成：已檢查並自動補填 ${values.length} 筆資料列。`;
+}
+
+/**
+ * 自動檢查並補填缺失之 submission_id 與 target_key（輕量、安全、冪等）
+ * 1. 唯讀快篩：若所有有效資料列皆已齊備技術欄位，立即返回 0 耗時（Fast-path）
+ * 2. 關係連結：同一系統之多個標的列優先繼承既有 UUID；若全無則分配同一組全新 UUID
+ * 3. 標的推導：依 targetName 自動推導標準 target_key
+ * 4. 精準寫回：僅批次寫入第 21 欄 (submission_id) 與第 22 欄 (target_key)，絕不碰觸 1~20 欄業務資料
+ * 5. 記憶體同步：直接更新傳入之 values 陣列，確保後續第一層聚合立即可用
+ */
+function autoBackfillTechnicalKeysIfNeeded_(sheet, values, indices) {
+  if (!values || values.length === 0) return values;
+
+  // 1. 唯讀快篩：若無任何空白技術欄位，直接跳出（Fast-path）
+  let hasMissing = false;
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const sysName = (indices.systemName !== -1 && row[indices.systemName]) ? String(row[indices.systemName]).trim() : '';
+    const tgtName = (indices.targetName !== -1 && row[indices.targetName]) ? String(row[indices.targetName]).trim() : '';
+    if (!sysName || !tgtName) continue;
+
+    const subId = (indices.submissionId !== -1 && row[indices.submissionId] !== undefined) ? String(row[indices.submissionId]).trim() : '';
+    const tgtKey = (indices.targetKey !== -1 && row[indices.targetKey] !== undefined) ? normalizeTargetKey_(row[indices.targetKey]) : '';
+    if (!subId || !tgtKey) {
+      hasMissing = true;
+      break;
+    }
+  }
+
+  if (!hasMissing) return values;
+
+  // 2. 表頭防護：確認表頭索引有效
+  if (sheet && (indices.submissionId === -1 || indices.targetKey === -1)) {
+    ensureTechnicalHeadersExist_(sheet, indices);
+  }
+
+  // 3. 第一階段：收集同系統已有之 UUID
+  const systemToExistingUuid = new Map();
+  values.forEach(function(row) {
+    const sysName = (indices.systemName !== -1 && row[indices.systemName]) ? String(row[indices.systemName]).trim() : '';
+    const sysLevel = (indices.systemLevel !== -1 && row[indices.systemLevel]) ? String(row[indices.systemLevel]).trim() : '';
+    const mgrName = (indices.managerName !== -1 && row[indices.managerName]) ? String(row[indices.managerName]).trim() : '';
+    const subId = (indices.submissionId !== -1 && row[indices.submissionId]) ? String(row[indices.submissionId]).trim() : '';
+
+    if (sysName && subId) {
+      const sysKey = [sysName, sysLevel, mgrName].join('||');
+      if (!systemToExistingUuid.has(sysKey)) {
+        systemToExistingUuid.set(sysKey, subId);
+      }
+    }
+  });
+
+  // 4. 第二階段：為空白列分配同一組 UUID 並推導 target_key
+  const systemToAssignedUuid = new Map();
+  let updatedCount = 0;
+
+  values.forEach(function(row) {
+    const sysName = (indices.systemName !== -1 && row[indices.systemName]) ? String(row[indices.systemName]).trim() : '';
+    const sysLevel = (indices.systemLevel !== -1 && row[indices.systemLevel]) ? String(row[indices.systemLevel]).trim() : '';
+    const mgrName = (indices.managerName !== -1 && row[indices.managerName]) ? String(row[indices.managerName]).trim() : '';
+    const tgtName = (indices.targetName !== -1 && row[indices.targetName]) ? String(row[indices.targetName]).trim() : '';
+
+    if (!sysName || !tgtName) return;
+
+    const sysKey = [sysName, sysLevel, mgrName].join('||');
+    let currentSubId = (indices.submissionId !== -1 && row[indices.submissionId] !== undefined) ? String(row[indices.submissionId]).trim() : '';
+    let currentTargetKey = (indices.targetKey !== -1 && row[indices.targetKey] !== undefined) ? normalizeTargetKey_(row[indices.targetKey]) : '';
+    let rowChanged = false;
+
+    if (!currentSubId) {
+      let targetUuid = systemToExistingUuid.get(sysKey);
+      if (!targetUuid) {
+        if (!systemToAssignedUuid.has(sysKey)) {
+          systemToAssignedUuid.set(sysKey, Utilities.getUuid());
+        }
+        targetUuid = systemToAssignedUuid.get(sysKey);
+      }
+      if (indices.submissionId !== -1) {
+        row[indices.submissionId] = targetUuid;
+        rowChanged = true;
+      }
+    }
+
+    if (!currentTargetKey) {
+      const derivedKey = targetNameToKey_(tgtName) || 'other';
+      if (indices.targetKey !== -1) {
+        row[indices.targetKey] = derivedKey;
+        rowChanged = true;
+      }
+    }
+
+    if (rowChanged) updatedCount++;
+  });
+
+  // 5. 第三階段：精準批次寫回 Google Sheet 第 21 與 22 欄
+  if (sheet && updatedCount > 0 && indices.submissionId !== -1 && indices.targetKey !== -1) {
+    try {
+      const numRows = values.length;
+      const techUpdates = values.map(function(row) {
+        return [row[indices.submissionId] || '', row[indices.targetKey] || ''];
+      });
+
+      if (indices.targetKey === indices.submissionId + 1) {
+        sheet.getRange(2, indices.submissionId + 1, numRows, 2).setValues(techUpdates);
+      } else {
+        sheet.getRange(2, indices.submissionId + 1, numRows, 1).setValues(techUpdates.map(function(p) { return [p[0]]; }));
+        sheet.getRange(2, indices.targetKey + 1, numRows, 1).setValues(techUpdates.map(function(p) { return [p[1]]; }));
+      }
+      console.log(`[autoBackfill] 自動補齊完成：更新了 ${updatedCount} 筆資料列之技術欄位 (submission_id / target_key)`);
+    } catch (err) {
+      console.warn(`[autoBackfill] 寫回試算表異常（仍已在記憶體中補齊以維持聚合正確）：${err}`);
+    }
+  }
+
+  return values;
+}
+
 // 3. 讀取儀表板資料（由 Sheet 還原成前端 appData 結構）
 function getDashboardData() {
   try {
@@ -603,10 +784,15 @@ function getDashboardData() {
       return { success: true, data: [] };
     }
 
+    ensureSheetColumnsExist_(sheet, EXPECTED_HEADERS.length);
+
     const headerValues = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const indices = resolveHeaderIndices_(headerValues);
     const colCount = Math.max(sheet.getLastColumn(), EXPECTED_HEADERS.length);
     const values = sheet.getRange(2, 1, lastRow - 1, colCount).getValues();
+
+    // 在執行第一層聚合前，自動檢查並補填空白技術欄位（確保同系統標的歸併完整且持久化回 Sheet）
+    autoBackfillTechnicalKeysIfNeeded_(sheet, values, indices);
 
     // 將每一列（單一標的）轉換為 submission group，再取每個系統最新一次提交
     const bySubmission = new Map();

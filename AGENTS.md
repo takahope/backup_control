@@ -55,6 +55,8 @@ PRs should include:
 - Keep permission checks server-side for every data API, not only `doGet`.
 
 ## Incident & Change Log
+- 2026-09-23: 徹底移除前端 Index.html 的 localStorage 快取機制（isms_backup_records），載入時主動清除歷史殘留快取，建立 100% 以 Google Sheet 後端為唯一真實來源（Single Source of Truth）的無快取架構；後端加入 ensureSheetColumnsExist_ 格線邊界保護與 runAutoBackfillNow 免部署直驗工具，全套 21 項測試全數通過。
+- 2026-09-23: 實作第一層聚合前自動補填技術欄位 (submission_id, target_key) 機制。在 getDashboardData 建立 autoBackfillTechnicalKeysIfNeeded_ 輕量偵測旁路（Fast-path 0 寫入），當發現空白列時自動依同系統關聯性補齊 UUID 並推導 target_key，精準批次持久化至主表第 21、22 欄（不碰觸 1~20 欄業務資料），徹底杜絕同一系統標的被拆散或覆蓋的聚合錯誤；後端單元測試擴充至 9 項全數通過。
 - 2026-09-22: 修復每次載入頁面時觸發破壞性遷移導致後端資料錯位與資料洗成「無」的嚴重缺陷。徹底解耦 CQRS，從 `getDashboardData` 與 `deleteSubmission` 中移除 `checkAndSetHeaders`，主表與歷程表改為僅在全空時以 `ensureHeadersExist_` 寫入表頭；修正 `resolveHeaderIndices_` 缺漏欄位改為回傳 `-1` 徹底杜絕索引錯位；修復 `migrateSheetIfNeeded_` 在 26 欄工作表中的表頭比對判定；加強 `projectBusinessRow_` 異地資料與布林值保護；新增專用技術欄位安全補齊工具 `backfillMissingTechnicalKeys`；完成後端 5 項單元測試。
 - 2026-09-21: 完成智慧排程選擇器表單生命週期整合（編輯回填 Hydration、表單重置 Reset、送出驗證）。在 editSystem 實作反向解析與歷史字串洗淨正規化，resetForm 正確重設所有標的與各軌控制項預設值（本地「每日 00:00」、異地「無」），handleFormSubmit 送出前強制執行 syncTargetSchedule；完成全系統 11 項單元與生命週期整合測試。
 - 2026-09-20: 實作跨專案資料契約「備份管制表 20 欄（含 2 欄技術欄位共 22 欄）」升級；後端建立 Header-Aware 動態表頭解析與零停機平滑資料遷移機制，並新增管理員專用一鍵安全遷移工具 `runDataMigration`（含事前自動快照備份）；前端表單與儀表板擴充本地／異地排程時間（預設 每日 00:00）、處置方法（預設 磁碟自動覆寫）及佐證種類；文件生成維護原有核定格式不改動。
