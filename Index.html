@@ -137,7 +137,8 @@
         
         <form id="backupForm" onsubmit="handleFormSubmit(event)">
           <datalist id="systemOptionsList"></datalist>
-          <datalist id="assetOptionsList"></datalist>
+          <datalist id="sourceAssetOptionsList"></datalist>
+          <datalist id="storageAssetOptionsList"></datalist>
 
           <!-- 隱藏識別欄位：submissionId 對應 U 欄，sourceSystemId 對應 B 欄 -->
           <input type="hidden" id="submissionId" value="">
@@ -164,7 +165,7 @@
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700">系統屬性</label>
-                <select id="systemLevel" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500" onchange="renderAssetOptionsDatalist()">
+                <select id="systemLevel" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500" onchange="renderSourceOptionsDatalists()">
                   <option value="">請選擇 (或由系統名稱帶入)</option>
                   <option value="關鍵核心系統">關鍵核心系統</option>
                   <option value="一般系統">一般系統</option>
@@ -575,6 +576,7 @@
     let appData = [];
     let systemOptionsData = [];
     let assetOptionsData = [];
+    let assetOptionsLoadState = 'loading';
     let dashboardLoadProgress = 0;
     let dashboardLoadTimer = null;
     let dashboardLoadError = null;
@@ -715,16 +717,16 @@
       
       const sysNameInput = document.getElementById('systemName');
       if (sysNameInput) {
-        sysNameInput.setAttribute('list', sourceRadio.value === 'systems' ? 'systemOptionsList' : 'assetOptionsList');
+        sysNameInput.setAttribute('list', sourceRadio.value === 'systems' ? 'systemOptionsList' : 'sourceAssetOptionsList');
         if (isUserAction) {
           sysNameInput.value = '';
         }
       }
     }
 
-    function renderAssetOptionsDatalist() {
+    function renderSourceOptionsDatalists() {
       const sysList = document.getElementById('systemOptionsList');
-      const astList = document.getElementById('assetOptionsList');
+      const astList = document.getElementById('sourceAssetOptionsList');
       const levelSelect = document.getElementById('systemLevel');
       const filterLevel = levelSelect ? levelSelect.value : '';
       
@@ -737,7 +739,7 @@
           sysList.appendChild(option);
         });
       }
-      
+
       if (astList) {
         astList.innerHTML = '';
         const filteredAst = filterLevel ? assetOptionsData.filter(item => item.level === filterLevel) : assetOptionsData;
@@ -747,8 +749,25 @@
           astList.appendChild(option);
         });
       }
-      
+
       handleSourceChange(false);
+    }
+
+    function renderStorageAssetOptionsDatalist() {
+      const storageList = document.getElementById('storageAssetOptionsList');
+      if (!storageList) return;
+
+      storageList.innerHTML = '';
+      assetOptionsData.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.name;
+        storageList.appendChild(option);
+      });
+    }
+
+    function renderAssetOptionsDatalists() {
+      renderSourceOptionsDatalists();
+      renderStorageAssetOptionsDatalist();
     }
 
     function loadAssetOptions() {
@@ -758,23 +777,27 @@
             if (response && response.success && response.data) {
               systemOptionsData = response.data.systems || [];
               assetOptionsData = response.data.assets || [];
+              assetOptionsLoadState = 'ready';
             } else {
               systemOptionsData = [];
               assetOptionsData = [];
+              assetOptionsLoadState = 'error';
             }
-            renderAssetOptionsDatalist();
+            renderAssetOptionsDatalists();
           })
           .withFailureHandler(function() {
             systemOptionsData = [];
             assetOptionsData = [];
-            renderAssetOptionsDatalist();
+            assetOptionsLoadState = 'error';
+            renderAssetOptionsDatalists();
           })
           .getAssetOptions();
       } else {
         // 本地測試時沒有 Apps Script 後端，保留空清單
         systemOptionsData = [];
         assetOptionsData = [];
-        renderAssetOptionsDatalist();
+        assetOptionsLoadState = 'error';
+        renderAssetOptionsDatalists();
       }
     }
 
@@ -841,13 +864,20 @@
         const levelSelect = document.getElementById('systemLevel');
         if (levelSelect && levelSelect.value !== matched.level) {
           levelSelect.value = matched.level;
-          renderAssetOptionsDatalist(); // 同步更新 datalist
+          renderSourceOptionsDatalists(); // 僅同步更新來源選項，不影響備份儲存設備
         }
       }
     }
 
     function validateLocalLocationSelection(activeTargets) {
-      if (!Array.isArray(assetOptionsData) || assetOptionsData.length === 0) return true;
+      if (assetOptionsLoadState !== 'ready') {
+        alert('資訊資產清單載入失敗，請重新整理頁面後再試。');
+        return false;
+      }
+      if (!Array.isArray(assetOptionsData) || assetOptionsData.length === 0) {
+        alert('資訊資產清單目前沒有可選資料，請聯絡管理員確認清單設定。');
+        return false;
+      }
       const validNames = assetOptionsData.map(item => item.name);
 
       for (const t of activeTargets) {
@@ -1409,7 +1439,7 @@
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
-                <input type="search" list="assetOptionsList" id="logLocalLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                <input type="search" list="storageAssetOptionsList" id="logLocalLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
               </div>
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地排程時間 <span class="text-red-500">*</span></label>
@@ -1470,7 +1500,7 @@
 
               <div class="flex flex-col mt-2">
                 <label class="block text-sm font-medium text-gray-600 mb-1">本地存放地點/設備 <span class="text-red-500">*</span></label>
-                <input type="search" list="assetOptionsList" id="localLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                <input type="search" list="storageAssetOptionsList" id="localLoc_${target.id}" placeholder="請搜尋或選擇資訊資產" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
               </div>
 
               <div class="flex flex-col mt-2">

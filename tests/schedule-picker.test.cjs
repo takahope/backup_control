@@ -18,6 +18,14 @@ function createMockDom() {
       const element = {
         id,
         value: '',
+        _innerHTML: '',
+        get innerHTML() {
+          return this._innerHTML;
+        },
+        set innerHTML(value) {
+          this._innerHTML = value;
+          if (value === '') this.options = [];
+        },
         textContent: '',
         innerText: '',
         style: {},
@@ -133,10 +141,83 @@ const {
   handleChoiceSelectChange_,
   resetChoiceSelect_,
   handleSystemNameInput,
+  renderSourceOptionsDatalists,
+  renderStorageAssetOptionsDatalist,
+  validateLocalLocationSelection,
   editSystem,
   resetForm,
   handleFormSubmit
 } = sandbox;
+
+// --- 資料來源與備份儲存設備選單責任分離測試 ---
+
+test('來源資訊資產依系統屬性篩選，但備份儲存設備永遠包含全部資訊資產', () => {
+  assert.equal(typeof renderSourceOptionsDatalists, 'function');
+  assert.equal(typeof renderStorageAssetOptionsDatalist, 'function');
+
+  currentMockDom = createMockDom();
+  currentMockDom.getElementById('systemLevel').value = '一般系統';
+  currentMockDom.querySelector = () => ({ value: 'assets' });
+  vm.runInContext(`
+    systemOptionsData = [];
+    assetOptionsData = [
+      { name: "AST-LOW - 一般儲存設備", level: "一般系統" },
+      { name: "AST-HIGH - 核心儲存設備", level: "關鍵核心系統" }
+    ];
+  `, sandbox);
+
+  renderSourceOptionsDatalists();
+  renderStorageAssetOptionsDatalist();
+
+  assert.deepEqual(
+    currentMockDom.getElementById('sourceAssetOptionsList').options.map(option => option.value),
+    ['AST-LOW - 一般儲存設備']
+  );
+  assert.deepEqual(
+    currentMockDom.getElementById('storageAssetOptionsList').options.map(option => option.value),
+    ['AST-LOW - 一般儲存設備', 'AST-HIGH - 核心儲存設備']
+  );
+  assert.equal(currentMockDom.getElementById('systemName').list, 'sourceAssetOptionsList');
+
+  currentMockDom.getElementById('systemLevel').value = '關鍵核心系統';
+  renderSourceOptionsDatalists();
+  assert.deepEqual(
+    currentMockDom.getElementById('sourceAssetOptionsList').options.map(option => option.value),
+    ['AST-HIGH - 核心儲存設備']
+  );
+  assert.deepEqual(
+    currentMockDom.getElementById('storageAssetOptionsList').options.map(option => option.value),
+    ['AST-LOW - 一般儲存設備', 'AST-HIGH - 核心儲存設備'],
+    '切換系統屬性不得縮限備份儲存設備清單'
+  );
+});
+
+test('一般系統可選擇資產價值較高的資訊資產作為本地備份設備', () => {
+  currentMockDom = createMockDom();
+  currentMockDom.getElementById('localLoc_db').value = 'AST-HIGH - 核心儲存設備';
+  vm.runInContext(`
+    assetOptionsLoadState = "ready";
+    assetOptionsData = [
+      { name: "AST-HIGH - 核心儲存設備", level: "關鍵核心系統" }
+    ];
+  `, sandbox);
+
+  assert.equal(validateLocalLocationSelection([{ id: 'db', name: '資料庫' }]), true);
+});
+
+test('資訊資產清單載入失敗或沒有資料時必須阻止送出', () => {
+  currentMockDom = createMockDom();
+  const alerts = [];
+  sandbox.alert = message => alerts.push(message);
+
+  vm.runInContext(`assetOptionsLoadState = "error"; assetOptionsData = [];`, sandbox);
+  assert.equal(validateLocalLocationSelection([{ id: 'db', name: '資料庫' }]), false);
+  assert.match(alerts.pop(), /資訊資產清單載入失敗/);
+
+  vm.runInContext(`assetOptionsLoadState = "ready"; assetOptionsData = [];`, sandbox);
+  assert.equal(validateLocalLocationSelection([{ id: 'db', name: '資料庫' }]), false);
+  assert.match(alerts.pop(), /沒有可選資料/);
+});
 
 // --- Task 1 核心語法測試 ---
 
@@ -671,6 +752,11 @@ test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標�
   currentMockDom.getElementById('offsite_db_val_否').value = '否';
   currentMockDom.getElementById('submissionId').value = 'sub-001';
   currentMockDom.getElementById('sourceSystemId').value = 'SYS-001';
+  currentMockDom.getElementById('localLoc_db').value = 'AST-001 - 備份設備';
+  vm.runInContext(`
+    assetOptionsLoadState = "ready";
+    assetOptionsData = [{ name: "AST-001 - 備份設備", level: "一般系統" }];
+  `, sandbox);
 
   let submittedFormData = null;
   const run = {
