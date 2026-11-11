@@ -486,6 +486,7 @@ function submitData(formData) {
       if (!targetKey) {
         throw new Error('備份標的缺少可識別 target_key。');
       }
+      assertLocalBackupCyclePresent_(target);
       payloadRowsByTargetKey[targetKey] = buildSheetRowData_({
         timestamp: timestamp,
         systemId: systemId,
@@ -1035,6 +1036,22 @@ function parseTargetFromRow(row, indices, targetKeyFromRow) {
   return target;
 }
 
+// 週期值是否有啟用：數值 > 0 才算有此備份軌（空白、0、N/A、無 皆視為未啟用）
+function isCycleEnabled_(value) {
+  const num = parseFloat(String(value === undefined || value === null ? '' : value).trim());
+  return !isNaN(num) && num > 0;
+}
+
+// 一般備份標的的完整備份與差異備份至少須設定其中一種（系統日誌檔不適用）
+function assertLocalBackupCyclePresent_(target) {
+  const targetName = String(target.targetName || '').trim();
+  const targetKey = normalizeTargetKey_(target.targetKey) || targetNameToKey_(targetName);
+  if (targetName === '系統日誌檔' || targetKey === 'log') return;
+  if (!isCycleEnabled_(target.localFullValue) && !isCycleEnabled_(target.localDiffValue)) {
+    throw new Error('備份標的「' + targetName + '」的完整備份與差異備份至少須設定其中一種。');
+  }
+}
+
 function buildSheetRowData_(options) {
   const target = options.target || {};
   const targetName = String(target.targetName || '').trim();
@@ -1054,10 +1071,13 @@ function buildSheetRowData_(options) {
     offsiteCycleDisplay = '不適用';
     offsiteRetentionDisplay = '不適用';
   } else {
-    diffDisplay = (target.localDiffValue && target.localDiffValue !== '0' && target.localDiffValue !== 'N/A')
-      ? (target.localDiffValue + ' ' + target.localDiffUnit)
+    // 完整備份與差異備份皆為選填：週期值為空白或 0 時一律寫入「無」
+    diffDisplay = isCycleEnabled_(target.localDiffValue)
+      ? (String(target.localDiffValue).trim() + ' ' + target.localDiffUnit)
       : '無';
-    fullDisplay = target.localFullValue + ' ' + target.localFullUnit;
+    fullDisplay = isCycleEnabled_(target.localFullValue)
+      ? (String(target.localFullValue).trim() + ' ' + target.localFullUnit)
+      : '無';
     retentionDisplay = target.localRetention === 'ALL' ? '全部保留' : (target.localRetention + ' 代');
     offsiteCycleDisplay = target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : '無';
     offsiteRetentionDisplay = target.isOffsite === '是' ? (target.offsiteRetention + ' 代') : '無';

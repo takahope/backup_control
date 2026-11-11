@@ -134,6 +134,9 @@ const {
   renderSchedulePickerTrackHtml,
   updateSchedulePickerUI,
   updateDiffPickerVisibility,
+  updateFullPickerVisibility,
+  validateLocalBackupCycles,
+  isCycleValueEnabled_,
   syncTargetSchedule,
   renderTargetSetting,
   renderFormTargets,
@@ -248,13 +251,37 @@ test('composeDualTrackSchedule 支援雙軌與單軌合成', () => {
   });
   assert.equal(fullOnly, '每週日 02:00');
 
-  // 僅差異軌
+  // 僅差異軌：必須帶「差異:」前綴，避免被誤讀為完整軌
   const diffOnly = composeDualTrackSchedule({
     hasDiff: true,
     fullSchedule: '',
     diffSchedule: '每日 02:00'
   });
-  assert.equal(diffOnly, '每日 02:00');
+  assert.equal(diffOnly, '差異:每日 02:00');
+
+  // 明確標示無完整備份（即使完整軌仍有殘留字串）
+  const noFullExplicit = composeDualTrackSchedule({
+    hasFull: false,
+    hasDiff: true,
+    fullSchedule: '每週日 02:00',
+    diffSchedule: '每日 01:00'
+  });
+  assert.equal(noFullExplicit, '差異:每日 01:00');
+
+  // 兩軌皆未啟用時維持預設值
+  const neither = composeDualTrackSchedule({ hasFull: false, hasDiff: false });
+  assert.equal(neither, '每日 00:00');
+});
+
+test('isCycleValueEnabled_ 僅數值 > 0 視為啟用，空白、0、N/A、無 皆為未啟用', () => {
+  assert.equal(isCycleValueEnabled_('1'), true);
+  assert.equal(isCycleValueEnabled_(2), true);
+  assert.equal(isCycleValueEnabled_('0'), false);
+  assert.equal(isCycleValueEnabled_(''), false);
+  assert.equal(isCycleValueEnabled_(undefined), false);
+  assert.equal(isCycleValueEnabled_(null), false);
+  assert.equal(isCycleValueEnabled_('N/A'), false);
+  assert.equal(isCycleValueEnabled_('無'), false);
 });
 
 test('parseScheduleString 支援反向解析與歷史舊資料正規化 (選項 A)', () => {
@@ -278,6 +305,18 @@ test('parseScheduleString 支援反向解析與歷史舊資料正規化 (選項 
   // 4. 完全無時間的舊資料正規化
   const emptyLegacy = parseScheduleString('無排程', '天');
   assert.equal(emptyLegacy.full.time, '00:00');
+
+  // 5. 僅差異備份格式：回填到差異軌，且不被誤判為雙軌
+  const diffOnlyParsed = parseScheduleString('差異:每週三 01:30', '週');
+  assert.equal(diffOnlyParsed.isDual, false);
+  assert.equal(diffOnlyParsed.isDiffOnly, true);
+  assert.equal(diffOnlyParsed.diff.weekday, '三');
+  assert.equal(diffOnlyParsed.diff.time, '01:30');
+
+  // 6. 舊資料不帶前綴的單軌字串仍視為完整軌
+  const plainParsed = parseScheduleString('每日 02:00', '天');
+  assert.equal(plainParsed.isDiffOnly, undefined);
+  assert.equal(plainParsed.full.time, '02:00');
 });
 
 // --- Task 2 前端複合選擇器 HTML 與動態控制器測試 ---
@@ -295,7 +334,7 @@ test('renderSchedulePickerTrackHtml 產出符合規範的 DOM 元件結構', () 
   assert.ok(fullHtml.includes('id="fullSchedTime_db"'), '應包含時間選單 ID');
   assert.ok(fullHtml.includes('id="fullSchedVersionTag_db"'), '應包含版本標籤 ID');
   assert.ok(fullHtml.includes('月底最後一日'), '日期選單應包含月底最後一日');
-  assert.ok(!fullHtml.includes('schedule-picker-track flex flex-wrap items-center gap-2 hidden'), '完整軌預設不應隱藏');
+  assert.ok(fullHtml.includes('schedule-picker-track flex flex-wrap items-center gap-2 hidden'), '完整備份為選填，完整軌預設應隱藏（週期 > 0 才顯示）');
 
   // 測試差異軌
   const diffHtml = renderSchedulePickerTrackHtml('db', 'diff', '差異排程:');
@@ -522,6 +561,7 @@ test('syncTargetSchedule 正確合成排程字串並更新隱藏 input 與預覽
 
   currentMockDom = createMockDom();
   // 設置一般標的 db
+  currentMockDom.register('fullValue_db', { value: '1' });
   currentMockDom.register('fullUnit_db', { value: '週' });
   currentMockDom.register('fullSchedWeekday_db', { value: '日' });
   currentMockDom.register('fullSchedTime_db', { value: '02:00' });
@@ -552,6 +592,15 @@ test('syncTargetSchedule 正確合成排程字串並更新隱藏 input 與預覽
   syncTargetSchedule('db');
   assert.equal(localInput.value, '完整:每週日 02:00 / 差異:每日 01:00');
   assert.equal(localPreview.textContent, '排程設定值: 完整:每週日 02:00 / 差異:每日 01:00');
+
+  // 2.1 僅差異備份情境 (完整備份 0 / 空白)：完整軌排程不得被寫入
+  currentMockDom.register('fullValue_db', { value: '' });
+  syncTargetSchedule('db');
+  assert.equal(localInput.value, '差異:每日 01:00');
+  assert.equal(localPreview.textContent, '排程設定值: 差異:每日 01:00');
+  currentMockDom.register('fullValue_db', { value: '0' });
+  syncTargetSchedule('db');
+  assert.equal(localInput.value, '差異:每日 01:00');
 
   // 3. 系統日誌檔 (log) 固定天週期
   currentMockDom.register('fullSchedTime_log', { value: '04:15' });
@@ -728,6 +777,8 @@ test('表單重置 resetForm 後所有標的與軌道恢復初始預設值', () 
   assert.equal(currentMockDom.getElementById('fullSchedDay_db').value, '1');
   assert.equal(currentMockDom.getElementById('diffSchedTime_db').value, '00:00');
   assert.equal(currentMockDom.getElementById('diffSchedulePicker_db').classList.contains('hidden'), true);
+  assert.equal(currentMockDom.getElementById('fullValue_db').value, '');
+  assert.equal(currentMockDom.getElementById('fullSchedulePicker_db').classList.contains('hidden'), true);
   assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '每日 00:00');
   assert.equal(currentMockDom.getElementById('offsiteScheduleTime_db').value, '無');
   assert.equal(currentMockDom.getElementById('offsiteSchedulePreview_db').textContent, '排程設定值: 無');
@@ -744,6 +795,7 @@ test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標�
 
   // 勾選 db 標的
   currentMockDom.getElementById('check_db').checked = true;
+  currentMockDom.getElementById('fullValue_db').value = '1';
   currentMockDom.getElementById('fullUnit_db').value = '天';
   // 模擬使用者直接變更 time input 尚未 trigger 任何 event
   currentMockDom.getElementById('fullSchedTime_db').value = '05:45';
@@ -779,4 +831,151 @@ test('handleFormSubmit 送出前強制執行 syncTargetSchedule 確保所有標�
   assert.equal(submittedFormData.systemId, 'SYS-001');
   assert.equal(submittedFormData.targets[0].offsiteDispositionMethod, '無');
   assert.equal(submittedFormData.targets[0].offsiteEvidenceRequirements, '無');
+});
+
+
+// --- 完整備份改為選填（完整、差異二擇一必填）---
+
+test('updateFullPickerVisibility 依完整備份數值（>0）動態切換完整軌可見度', () => {
+  currentMockDom = createMockDom();
+  const fullValEl = currentMockDom.register('fullValue_db', { value: '' });
+  const fullPicker = currentMockDom.register('fullSchedulePicker_db', { classes: ['hidden'] });
+  currentMockDom.register('fullUnit_db', { value: '天' });
+  currentMockDom.register('fullSchedTime_db', { value: '00:00' });
+  currentMockDom.register('localScheduleTime_db', { value: '' });
+  currentMockDom.register('localSchedulePreview_db', { textContent: '' });
+
+  updateFullPickerVisibility('db');
+  assert.equal(fullPicker.classList.contains('hidden'), true);
+
+  fullValEl.value = '1';
+  updateFullPickerVisibility('db');
+  assert.equal(fullPicker.classList.contains('hidden'), false);
+
+  fullValEl.value = '0';
+  updateFullPickerVisibility('db');
+  assert.equal(fullPicker.classList.contains('hidden'), true);
+});
+
+test('完整備份欄位不再必填：標籤無紅色星號、min 為 0，勾選標的也不設定 required', () => {
+  currentMockDom = createMockDom();
+  renderFormTargets();
+  const targetHtml = currentMockDom.getElementById('targetsContainer').innerHTML;
+  const fullLabelMatch = targetHtml.match(/每 ___ 執行「完整備份」[^<]*<\/label>/);
+  assert.ok(fullLabelMatch, '完整備份標籤內不得含必填星號 span（label 應直接結束）');
+  assert.ok(/每 ___ 執行「差異備份」[^<]*<\/label>/.test(targetHtml), '差異備份標籤同樣無星號');
+  const fullInput = targetHtml.match(/<input[^>]*id="fullValue_db"[^>]*>/)[0];
+  assert.ok(fullInput.includes('min="0"'), '完整備份數值 min 應為 0');
+  assert.ok(fullInput.includes('0代表無'), '應提示 0 代表無');
+  assert.ok(fullInput.includes("updateFullPickerVisibility('db')"), '輸入時應連動完整軌可見度');
+
+  currentMockDom = createMockDom();
+  currentMockDom.getElementById('check_db').checked = true;
+  vm.runInContext(`toggleTarget('db')`, sandbox);
+  assert.equal(currentMockDom.getElementById('fullValue_db').required, false, '勾選標的後完整備份數值不得為 required');
+});
+
+test('validateLocalBackupCycles 完整、差異二擇一必填，系統日誌檔不適用', () => {
+  const alerts = [];
+  sandbox.alert = (msg) => alerts.push(msg);
+
+  currentMockDom = createMockDom();
+  currentMockDom.getElementById('fullValue_db').value = '';
+  currentMockDom.getElementById('diffValue_db').value = '';
+  assert.equal(validateLocalBackupCycles([{ id: 'db', name: '資料庫' }]), false, '兩者皆空必須擋下');
+  assert.equal(alerts.length, 1);
+  assert.ok(alerts[0].includes('資料庫'));
+
+  currentMockDom.getElementById('fullValue_db').value = '0';
+  currentMockDom.getElementById('diffValue_db').value = '0';
+  assert.equal(validateLocalBackupCycles([{ id: 'db', name: '資料庫' }]), false, '兩者皆 0 必須擋下');
+
+  currentMockDom.getElementById('fullValue_db').value = '';
+  currentMockDom.getElementById('diffValue_db').value = '1';
+  assert.equal(validateLocalBackupCycles([{ id: 'db', name: '資料庫' }]), true, '僅差異備份應通過');
+
+  currentMockDom.getElementById('fullValue_db').value = '1';
+  currentMockDom.getElementById('diffValue_db').value = '';
+  assert.equal(validateLocalBackupCycles([{ id: 'db', name: '資料庫' }]), true, '僅完整備份應通過');
+
+  assert.equal(validateLocalBackupCycles([{ id: 'log', name: '系統日誌檔' }]), true, '系統日誌檔不適用');
+
+  sandbox.alert = () => {};
+});
+
+test('handleFormSubmit 僅差異備份可送出：完整週期送 0、排程為「差異:」格式；兩者皆空則阻止送出', () => {
+  function runSubmit(fullValue, diffValue) {
+    currentMockDom = createMockDom();
+    currentMockDom.getElementById('check_db').checked = true;
+    currentMockDom.getElementById('fullValue_db').value = fullValue;
+    currentMockDom.getElementById('fullUnit_db').value = '週';
+    currentMockDom.getElementById('diffValue_db').value = diffValue;
+    currentMockDom.getElementById('diffUnit_db').value = '天';
+    currentMockDom.getElementById('diffSchedTime_db').value = '02:00';
+    currentMockDom.getElementById('offsite_db_val_否').checked = true;
+    currentMockDom.getElementById('offsite_db_val_否').value = '否';
+    currentMockDom.getElementById('localLoc_db').value = 'AST-001 - 備份設備';
+    vm.runInContext(`
+      assetOptionsLoadState = "ready";
+      assetOptionsData = [{ name: "AST-001 - 備份設備", level: "一般系統" }];
+    `, sandbox);
+
+    let submitted = null;
+    const run = {
+      withSuccessHandler() { return this; },
+      withFailureHandler() { return this; },
+      submitData(formData) { submitted = formData; }
+    };
+    sandbox.google = { script: { run } };
+    handleFormSubmit({ preventDefault: () => {} });
+    delete sandbox.google;
+    return submitted;
+  }
+
+  const diffOnly = runSubmit('', '1');
+  assert.ok(diffOnly, '僅差異備份應可送出');
+  assert.equal(diffOnly.targets[0].localFullValue, '0');
+  assert.equal(diffOnly.targets[0].localDiffValue, '1');
+  assert.equal(diffOnly.targets[0].localScheduleTime, '差異:每日 02:00');
+
+  const neither = runSubmit('', '');
+  assert.equal(neither, null, '完整與差異皆未設定時不得送出');
+});
+
+test('表單編輯回填僅差異備份：完整備份數值留空、完整軌隱藏、差異軌顯示並保留排程', () => {
+  currentMockDom = createMockDom();
+  currentMockDom.register('fullSchedulePicker_db', { classes: ['hidden'] });
+  currentMockDom.register('diffSchedulePicker_db', { classes: ['hidden'] });
+
+  vm.runInContext(`appData = [{
+    id: "sys-diff-only",
+    systemName: "僅差異系統",
+    systemLevel: "一般系統",
+    managerName: "陳小華",
+    targets: [
+      {
+        targetKey: "db",
+        targetName: "資料庫",
+        localDiffValue: "1",
+        localDiffUnit: "天",
+        localFullValue: "",
+        localFullUnit: "週",
+        localRetention: "7",
+        localLocation: "正式機房",
+        localScheduleTime: "差異:每日 01:30",
+        localDispositionMethod: "磁碟自動覆寫",
+        localEvidenceRequirements: "備份系統執行Log",
+        isOffsite: "否",
+        offsiteScheduleTime: "無"
+      }
+    ]
+  }];`, sandbox);
+
+  editSystem('sys-diff-only');
+
+  assert.equal(currentMockDom.getElementById('fullValue_db').value, '');
+  assert.equal(currentMockDom.getElementById('fullSchedulePicker_db').classList.contains('hidden'), true);
+  assert.equal(currentMockDom.getElementById('diffSchedulePicker_db').classList.contains('hidden'), false);
+  assert.equal(currentMockDom.getElementById('diffSchedTime_db').value, '01:30');
+  assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '差異:每日 01:30');
 });

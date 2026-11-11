@@ -32,6 +32,8 @@ exports.autoBackfillTechnicalKeysIfNeeded_ = autoBackfillTechnicalKeysIfNeeded_;
 exports.ensureSheetColumnsExist_ = ensureSheetColumnsExist_;
 exports.runAutoBackfillNow = runAutoBackfillNow;
 exports.archiveSubmissionRows_ = archiveSubmissionRows_;
+exports.buildSheetRowData_ = buildSheetRowData_;
+exports.isCycleEnabled_ = isCycleEnabled_;
 `;
 
 const mod = {};
@@ -845,4 +847,139 @@ test('assertSheetSchema_ 與 getDashboardData 在使用歷史 22 欄表頭（本
   assert.equal(result.data.length, 1);
   assert.equal(result.data[0].systemName, '人資系統');
   assert.equal(result.data[0].targets[0].localDispositionMethod, '磁碟自動覆寫');
+});
+
+
+// --- 完整備份改為選填（完整、差異二擇一必填）---
+
+function buildRowFor_(targetOverrides) {
+  return mod.buildSheetRowData_({
+    timestamp: new Date('2026-11-09T00:00:00Z'),
+    systemId: 'SYS-001',
+    systemName: '測試系統',
+    systemLevel: '一般系統',
+    managerName: '王小明',
+    submissionId: 'sub-001',
+    targetKey: 'db',
+    target: Object.assign({
+      targetName: '資料庫',
+      localFullValue: '1', localFullUnit: '週',
+      localDiffValue: '0', localDiffUnit: '天',
+      localRetention: '4', localLocation: 'NAS',
+      isOffsite: '否'
+    }, targetOverrides)
+  });
+}
+
+test('isCycleEnabled_ 僅數值 > 0 視為啟用', () => {
+  assert.equal(mod.isCycleEnabled_('1'), true);
+  assert.equal(mod.isCycleEnabled_('0'), false);
+  assert.equal(mod.isCycleEnabled_(''), false);
+  assert.equal(mod.isCycleEnabled_(undefined), false);
+  assert.equal(mod.isCycleEnabled_('N/A'), false);
+  assert.equal(mod.isCycleEnabled_('無'), false);
+});
+
+test('buildSheetRowData_ 完整週期為空白或 0 時寫入「無」，不得產生殘缺字串', () => {
+  const diffOnly = buildRowFor_({ localFullValue: '0', localFullUnit: '週', localDiffValue: '1', localDiffUnit: '天' });
+  assert.equal(diffOnly[6], '無', '本地_完整週期應為「無」');
+  assert.equal(diffOnly[7], '1 天');
+
+  const blankFull = buildRowFor_({ localFullValue: '', localFullUnit: '週', localDiffValue: '1', localDiffUnit: '天' });
+  assert.equal(blankFull[6], '無');
+  assert.ok(!/^\s*週/.test(String(blankFull[6])), '不得寫成「 週」');
+
+  const fullOnly = buildRowFor_({});
+  assert.equal(fullOnly[6], '1 週');
+  assert.equal(fullOnly[7], '無');
+
+  const both = buildRowFor_({ localDiffValue: '1', localDiffUnit: '天' });
+  assert.equal(both[6], '1 週');
+  assert.equal(both[7], '1 天');
+});
+
+test('僅差異備份寫入「無」後，parseTargetFromRow 讀回完整週期為空值且差異週期保留', () => {
+  const row = buildRowFor_({
+    localFullValue: '0', localFullUnit: '週', localDiffValue: '1', localDiffUnit: '天',
+    localScheduleTime: '差異:每日 01:30'
+  });
+  const indices = mod.resolveHeaderIndices_(mod.EXPECTED_HEADERS);
+  const parsed = mod.parseTargetFromRow(row, indices, 'db');
+  assert.equal(parsed.localFullValue, '');
+  assert.equal(parsed.localDiffValue, '1');
+  assert.equal(parsed.localDiffUnit, '天');
+  assert.equal(parsed.localScheduleTime, '差異:每日 01:30');
+});
+
+function runSubmitData_(targets) {
+  const rows = [mod.EXPECTED_HEADERS];
+  const written = [];
+  const sheet = {
+    getLastRow: () => rows.length,
+    getLastColumn: () => mod.EXPECTED_HEADERS.length,
+    getRange: (row, col, numRows, numCols) => ({
+      getValues: () => rows.slice(row - 1, row - 1 + numRows).map(r => r.slice(col - 1, col - 1 + numCols)),
+      setValues: values => { values.forEach(v => written.push(v.slice())); },
+      setFontWeight: () => {},
+      setBackground: () => {}
+    }),
+    setFrozenRows: () => {},
+    deleteRow: () => {}
+  };
+  const historySheet = Object.assign({}, sheet, { getLastRow: () => 1 });
+  const spreadsheet = {
+    getSheetByName: name => name === '備份管制' ? sheet : (name === '備份管制_歷程' ? historySheet : null),
+    insertSheet: () => historySheet
+  };
+  const runner = new Function('SpreadsheetApp', 'Utilities', 'Session', 'console', 'targets', `
+    ${codeJsContent}
+    checkAppPermission_ = () => ({ allowed: true, email: 'admin@example.com' });
+    return submitData({
+      systemId: 'SYS-001', systemName: '測試系統', systemLevel: '一般系統', managerName: '王小明',
+      targets: targets
+    });
+  `);
+  const result = runner(
+    { getActiveSpreadsheet: () => spreadsheet },
+    { getUuid: () => 'new-uuid' },
+    { getActiveUser: () => ({ getEmail: () => 'admin@example.com' }) },
+    console,
+    targets
+  );
+  return { result, written };
+}
+
+test('submitData 完整與差異備份皆未設定時必須拒絕寫入', () => {
+  const { result, written } = runSubmitData_([{
+    targetKey: 'db', targetName: '資料庫',
+    localFullValue: '0', localFullUnit: '週', localDiffValue: '0', localDiffUnit: '天',
+    localRetention: '4', localLocation: 'NAS', isOffsite: '否'
+  }]);
+  assert.equal(result.success, false);
+  assert.ok(String(result.message).includes('至少須設定其中一種'));
+  assert.equal(written.length, 0, '驗證失敗時不得寫入任何資料列');
+});
+
+test('submitData 僅差異備份可成功寫入，且完整週期欄為「無」', () => {
+  const { result, written } = runSubmitData_([{
+    targetKey: 'db', targetName: '資料庫',
+    localFullValue: '0', localFullUnit: '週', localDiffValue: '1', localDiffUnit: '天',
+    localScheduleTime: '差異:每日 02:00',
+    localRetention: '4', localLocation: 'NAS', isOffsite: '否'
+  }]);
+  assert.equal(result.success, true, result.message);
+  assert.equal(written.length, 1);
+  assert.equal(written[0][6], '無');
+  assert.equal(written[0][7], '1 天');
+  assert.equal(written[0][10], '差異:每日 02:00');
+});
+
+test('submitData 系統日誌檔不受完整、差異二擇一規則限制', () => {
+  const { result, written } = runSubmitData_([{
+    targetKey: 'log', targetName: '系統日誌檔',
+    localFullValue: '不適用', localDiffValue: '不適用',
+    logRetention: '保存 6 個月', localLocation: 'NAS', isOffsite: '否'
+  }]);
+  assert.equal(result.success, true, result.message);
+  assert.equal(written.length, 1);
 });

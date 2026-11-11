@@ -55,6 +55,7 @@ PRs should include:
 - Keep permission checks server-side for every data API, not only `doGet`.
 
 ## Incident & Change Log
+- 2026-11-09: 本地備份「完整備份」由必填改為選填，規則為「完整備份、差異備份二擇一必填」，以支援僅執行差異備份的標的。前端移除完整備份標籤星號與 `required`，數值欄 `min` 改 0 並提示「0代表無」，新增 `updateFullPickerVisibility`（週期 > 0 才顯示完整軌排程選擇器，與差異軌對稱），送出前以 `validateLocalBackupCycles` 阻擋兩者皆空；排程字串新增僅差異格式 `差異:每日 02:00`（`composeDualTrackSchedule`／`parseScheduleString` 同步支援，舊資料無前綴字串仍視為完整軌，免遷移）。後端新增 `isCycleEnabled_`，`buildSheetRowData_` 將完整週期空白或 0 寫為「無」（不再產生殘缺的「 週」），`submitData` 以 `assertLocalBackupCyclePresent_` 於寫入前拒絕兩者皆空（系統日誌檔除外）。新增 `GLOSSARY.md`；表頭與資料契約不變，無需執行 `runDataMigration`；全套 54 項測試通過。
 - 2026-09-23: 修復名詞升級後 assertSheetSchema_ 因嚴格字串比對拒絕未遷移試算表（處置/佐證舊表頭）導致前端顯示空狀態的缺陷。在後端引入 isHeaderCompatible_ 允許新舊表頭別名向下相容通過，確保舊版試算表免執行 runDataMigration 即可零停機平滑讀取；前端 loadDashboardData 補強 dashboardLoadError 狀態與重試入口，消除錯誤被靜默吞沒的隱患；全套 39 項測試全數通過。
 - 2026-09-23: 完成備份管制表「到期銷毀方法」與「銷毀確認方式」名詞升級與雙軌子面板視覺重構。後端升級 EXPECTED_HEADERS（12、13、19、20 欄）與歷程表頭，resolveHeaderIndices_ 與 parseTargetFromRow_ 完整支援新舊欄位別名相容，migrateSheetIfNeeded_ 平滑升級資料表；前端儀表板標的卡片重構為「本地（藍灰）／異地（紫羅蘭）」雙軌獨立子面板，內部標籤徹底去前綴化，未啟用異地時呈現優雅收合徽章；表單彈窗同步更新為直覺的到期銷毀方法與銷毀確認方式標籤；後端與生命週期測試全套 38 項全數通過。
 - 2026-09-23: 徹底移除前端 Index.html 的 localStorage 快取機制（isms_backup_records），載入時主動清除歷史殘留快取，建立 100% 以 Google Sheet 後端為唯一真實來源（Single Source of Truth）的無快取架構；後端加入 ensureSheetColumnsExist_ 格線邊界保護與 runAutoBackfillNow 免部署直驗工具，全套 21 項測試全數通過。

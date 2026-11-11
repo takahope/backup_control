@@ -281,16 +281,28 @@
       return `每日 ${t}`;
     }
 
-    function composeDualTrackSchedule(options = {}) {
-      const hasDiff = Boolean(options.hasDiff);
-      const fullStr = String(options.fullSchedule || '').trim();
-      const diffStr = hasDiff ? String(options.diffSchedule || '').trim() : '';
+    // 週期欄位是否「有啟用」：數值 > 0 才算有此備份軌（空白、0、N/A、無 皆視為未啟用）
+    function isCycleValueEnabled_(value) {
+      const num = parseFloat(String(value === undefined || value === null ? '' : value).trim());
+      return !isNaN(num) && num > 0;
+    }
 
-      if (hasDiff && fullStr && diffStr) {
-        return `完整:${fullStr} / 差異:${diffStr}`;
+    // 合成本地排程字串：
+    // - 完整＋差異：`完整:… / 差異:…`
+    // - 僅完整：不帶前綴的單軌字串（舊資料格式，向下相容）
+    // - 僅差異：`差異:…`（自我描述，避免被誤讀為完整軌）
+    function composeDualTrackSchedule(options = {}) {
+      const fullStr = String(options.fullSchedule || '').trim();
+      const hasFull = options.hasFull === undefined ? Boolean(fullStr) : Boolean(options.hasFull);
+      const hasDiff = Boolean(options.hasDiff);
+      const diffStr = hasDiff ? String(options.diffSchedule || '').trim() : '';
+      const effectiveFullStr = hasFull ? fullStr : '';
+
+      if (effectiveFullStr && diffStr) {
+        return `完整:${effectiveFullStr} / 差異:${diffStr}`;
       }
-      if (fullStr) return fullStr;
-      if (diffStr) return diffStr;
+      if (effectiveFullStr) return effectiveFullStr;
+      if (diffStr) return `差異:${diffStr}`;
       return '每日 00:00';
     }
 
@@ -309,6 +321,14 @@
         result.isDual = true;
         result.full = parseSingleScheduleSegment_(dualMatch[1].trim(), defaultUnit);
         result.diff = parseSingleScheduleSegment_(dualMatch[2].trim(), '天');
+        return result;
+      }
+
+      // 僅差異備份：`差異:每日 02:00`
+      const diffOnlyMatch = raw.match(/^差異:(.*)$/);
+      if (diffOnlyMatch) {
+        result.isDiffOnly = true;
+        result.diff = parseSingleScheduleSegment_(diffOnlyMatch[1].trim(), '天');
         return result;
       }
 
@@ -361,7 +381,8 @@
       const labelColor = isOffsite ? 'text-purple-700' : 'text-gray-500';
       const borderColor = isOffsite ? 'border-purple-300' : 'border-gray-300';
       const versionTagBg = isOffsite ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800';
-      const hiddenClass = isDiff ? ' hidden' : '';
+      // 完整軌與差異軌皆為選填，週期值為 0/空白時預設隱藏（由 update*PickerVisibility 依週期值切換）
+      const hiddenClass = (isDiff || track === 'full') ? ' hidden' : '';
       const displayTitle = title ? (title.endsWith(':') || title.endsWith('：') ? title : title + ':') : '';
 
       let monthOptions = '';
@@ -484,6 +505,21 @@
       syncTargetSchedule(targetId);
     }
 
+    // 完整備份為選填：週期值 > 0 才顯示完整軌排程選擇器（與差異軌對稱）
+    function updateFullPickerVisibility(targetId) {
+      const fullValInput = document.getElementById(`fullValue_${targetId}`);
+      const fullPicker = document.getElementById(`fullSchedulePicker_${targetId}`);
+      const val = parseFloat(fullValInput ? fullValInput.value : 0) || 0;
+      if (fullPicker) {
+        if (val > 0) {
+          fullPicker.classList.remove('hidden');
+        } else {
+          fullPicker.classList.add('hidden');
+        }
+      }
+      syncTargetSchedule(targetId);
+    }
+
     function syncTargetSchedule(targetId) {
       if (targetId === 'log') {
         const timeEl = document.getElementById(`fullSchedTime_${targetId}`);
@@ -494,7 +530,9 @@
         const localPreview = document.getElementById(`localSchedulePreview_${targetId}`);
         if (localPreview) localPreview.textContent = `排程設定值: ${localStr}`;
       } else {
-        // 完整備份軌
+        // 完整備份軌（選填：週期值為 0/空白代表不排程完整備份）
+        const fullValEl = document.getElementById(`fullValue_${targetId}`);
+        const hasFull = fullValEl ? isCycleValueEnabled_(fullValEl.value) : true;
         const fullUnitEl = document.getElementById(`fullUnit_${targetId}`);
         const fullUnit = fullUnitEl ? fullUnitEl.value : '天';
         const fullTimeEl = document.getElementById(`fullSchedTime_${targetId}`);
@@ -537,6 +575,7 @@
         }
 
         const localStr = composeDualTrackSchedule({
+          hasFull,
           hasDiff,
           fullSchedule,
           diffSchedule
@@ -890,6 +929,23 @@
         if (!validNames.includes(value)) {
           alert(`「${t.name}」的本地存放地點/設備請從下拉選單選擇有效的資訊資產。`);
           input.focus();
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // 完整備份、差異備份皆為選填，但每個一般標的至少須設定其中一種（系統日誌檔不適用）
+    function validateLocalBackupCycles(activeTargets) {
+      for (const t of activeTargets) {
+        if (t.id === 'log') continue;
+        const fullEl = document.getElementById(`fullValue_${t.id}`);
+        const diffEl = document.getElementById(`diffValue_${t.id}`);
+        const hasFull = fullEl ? isCycleValueEnabled_(fullEl.value) : false;
+        const hasDiff = diffEl ? isCycleValueEnabled_(diffEl.value) : false;
+        if (!hasFull && !hasDiff) {
+          alert(`「${t.name}」的完整備份與差異備份至少須設定其中一種（週期請填入大於 0 的數值）。`);
+          if (fullEl && typeof fullEl.focus === 'function') fullEl.focus();
           return false;
         }
       }
@@ -1260,6 +1316,7 @@
 
             updateSchedulePickerUI(tid, 'full', tData.localFullUnit || '天');
             updateSchedulePickerUI(tid, 'diff', tData.localDiffUnit || '天');
+            updateFullPickerVisibility(tid);
             updateDiffPickerVisibility(tid);
 
             // 避免 updateSchedulePickerUI 覆蓋已解析之月／日
@@ -1384,6 +1441,9 @@
         // 重設單位 UI 與可見度
         updateSchedulePickerUI(t.id, 'full', '天');
         if (t.id !== 'log') {
+          const fullValEl = document.getElementById(`fullValue_${t.id}`);
+          if (fullValEl) fullValEl.value = '';
+          updateFullPickerVisibility(t.id);
           const diffValEl = document.getElementById(`diffValue_${t.id}`);
           if (diffValEl) diffValEl.value = '';
           updateSchedulePickerUI(t.id, 'diff', '天');
@@ -1479,9 +1539,9 @@
               </div>
 
               <div class="flex flex-col">
-                <label class="block text-sm font-medium text-gray-600 mb-1">每 ___ 執行「完整備份」 <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-medium text-gray-600 mb-1">每 ___ 執行「完整備份」</label>
                 <div class="flex">
-                  <input type="number" id="fullValue_${target.id}" min="1" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
+                  <input type="number" id="fullValue_${target.id}" min="0" placeholder="0代表無" oninput="updateFullPickerVisibility('${target.id}')" onchange="updateFullPickerVisibility('${target.id}')" class="block w-20 rounded-l-md border-gray-300 shadow-sm p-2 border text-center focus:ring-blue-500 focus:border-blue-500">
                   <select id="fullUnit_${target.id}" onchange="updateSchedulePickerUI('${target.id}', 'full', this.value); syncTargetSchedule('${target.id}');" class="block w-full rounded-r-md border-gray-300 shadow-sm p-2 border border-l-0 bg-gray-50">
                     <option value="天">天</option><option value="週">週</option><option value="個月">個月</option><option value="年">年</option><option value="版本">版本</option>
                   </select>
@@ -1647,7 +1707,7 @@
           document.getElementById(`logRetVal_${targetId}`).required = true;
           document.getElementById(`logLocalLoc_${targetId}`).required = true;
         } else {
-          document.getElementById(`fullValue_${targetId}`).required = true;
+          // 完整備份為選填；完整、差異二擇一必填由 validateLocalBackupCycles 於送出前檢查
           const isAllRetention = document.getElementById(`localRetAll_${targetId}`).checked;
           document.getElementById(`localRet_${targetId}`).required = !isAllRetention;
           document.getElementById(`localLoc_${targetId}`).required = true;
@@ -1668,7 +1728,6 @@
           document.getElementById(`logRetVal_${targetId}`).required = false;
           document.getElementById(`logLocalLoc_${targetId}`).required = false;
         } else {
-          document.getElementById(`fullValue_${targetId}`).required = false;
           document.getElementById(`localRet_${targetId}`).required = false;
           document.getElementById(`localLoc_${targetId}`).required = false;
           document.getElementById(`localRetAll_${targetId}`).checked = false;
@@ -1758,6 +1817,9 @@
         alert("請至少勾選一項「備份標的」進行設定！");
         return;
       }
+      if (!validateLocalBackupCycles(activeTargets)) {
+        return;
+      }
       if (!validateLocalLocationSelection(activeTargets)) {
         return;
       }
@@ -1790,7 +1852,7 @@
           targetName: t.name,
           localDiffValue: t.id !== 'log' ? (document.getElementById(`diffValue_${t.id}`).value || '0') : '不適用',
           localDiffUnit: t.id !== 'log' ? document.getElementById(`diffUnit_${t.id}`).value : '',
-          localFullValue: t.id !== 'log' ? document.getElementById(`fullValue_${t.id}`).value : '不適用',
+          localFullValue: t.id !== 'log' ? (document.getElementById(`fullValue_${t.id}`).value || '0') : '不適用',
           localFullUnit: t.id !== 'log' ? document.getElementById(`fullUnit_${t.id}`).value : '',
           localRetention: t.id !== 'log'
             ? (document.getElementById(`localRetAll_${t.id}`).checked ? 'ALL' : document.getElementById(`localRet_${t.id}`).value)
