@@ -1042,6 +1042,12 @@ function isCycleEnabled_(value) {
   return !isNaN(num) && num > 0;
 }
 
+// 本地保留代數是否為「全部保留」（前端送 ALL，試算表存「全部保留」）
+function isRetentionAll_(value) {
+  const text = String(value === undefined || value === null ? '' : value).trim();
+  return text === 'ALL' || text === '全部保留';
+}
+
 // 一般備份標的的完整備份與差異備份至少須設定其中一種（系統日誌檔不適用）
 function assertLocalBackupCyclePresent_(target) {
   const targetName = String(target.targetName || '').trim();
@@ -1078,14 +1084,20 @@ function buildSheetRowData_(options) {
     fullDisplay = isCycleEnabled_(target.localFullValue)
       ? (String(target.localFullValue).trim() + ' ' + target.localFullUnit)
       : '無';
-    retentionDisplay = target.localRetention === 'ALL' ? '全部保留' : (target.localRetention + ' 代');
+    retentionDisplay = isRetentionAll_(target.localRetention) ? '全部保留' : (target.localRetention + ' 代');
     offsiteCycleDisplay = target.isOffsite === '是' ? (target.offsiteFreqValue + ' ' + target.offsiteFreqUnit) : '無';
     offsiteRetentionDisplay = target.isOffsite === '是' ? (target.offsiteRetention + ' 代') : '無';
   }
 
   const localScheduleTime = String(target.localScheduleTime || '每日 00:00').trim() || '每日 00:00';
-  const localDispositionMethod = String(target.localDispositionMethod || '磁碟自動覆寫').trim() || '磁碟自動覆寫';
-  const localEvidenceRequirements = String(target.localEvidenceRequirements || '備份系統執行Log').trim() || '備份系統執行Log';
+  // 全部保留代表不會銷毀：到期銷毀方法與銷毀確認方式一律寫入「無」（伺服器端強制，不信任前端）
+  const isRetentionAll = !isLogTarget && isRetentionAll_(target.localRetention);
+  const localDispositionMethod = isRetentionAll
+    ? '無'
+    : (String(target.localDispositionMethod || '磁碟自動覆寫').trim() || '磁碟自動覆寫');
+  const localEvidenceRequirements = isRetentionAll
+    ? '無'
+    : (String(target.localEvidenceRequirements || '備份系統執行Log').trim() || '備份系統執行Log');
 
   let offsiteScheduleTime = '無';
   let offsiteDispositionMethod = '無';

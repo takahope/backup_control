@@ -259,6 +259,65 @@
       selectEl.value = defaultValue;
     }
 
+    // --- 「保留所有版本」會停用到期銷毀方法與銷毀確認方式（全部保留代表不會銷毀，寫入「無」）---
+    const RETENTION_LOCK_VALUE = '無';
+    const retentionLockSnapshots_ = {};
+
+    function findRetentionLockOption_(selectEl) {
+      return Array.from(selectEl.options || []).find(function(option) {
+        return option.dataset && option.dataset.retentionLock === 'true';
+      });
+    }
+
+    function lockChoiceSelectForRetentionAll_(selectEl, defaultValue) {
+      if (!selectEl) return;
+      const key = selectEl.id;
+      // 只在第一次鎖定時記錄原本的選擇，重複呼叫不會覆蓋
+      if (!Object.prototype.hasOwnProperty.call(retentionLockSnapshots_, key)) {
+        retentionLockSnapshots_[key] = selectEl.value || defaultValue;
+      }
+      if (!findRetentionLockOption_(selectEl)) {
+        const lockOption = document.createElement('option');
+        lockOption.value = RETENTION_LOCK_VALUE;
+        lockOption.textContent = RETENTION_LOCK_VALUE;
+        lockOption.dataset.retentionLock = 'true';
+        selectEl.appendChild(lockOption);
+      }
+      selectEl.value = RETENTION_LOCK_VALUE;
+      selectEl.disabled = true;
+      selectEl.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
+    }
+
+    function unlockChoiceSelectFromRetentionAll_(selectEl, defaultValue) {
+      if (!selectEl) return;
+      const key = selectEl.id;
+      const lockOption = findRetentionLockOption_(selectEl);
+      if (lockOption) lockOption.remove();
+      selectEl.disabled = false;
+      selectEl.classList.remove('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
+
+      // 從未鎖定過就不動使用者目前的選擇
+      if (!Object.prototype.hasOwnProperty.call(retentionLockSnapshots_, key)) return;
+      const previousValue = retentionLockSnapshots_[key];
+      delete retentionLockSnapshots_[key];
+      const canRestore = Array.from(selectEl.options || []).some(function(option) {
+        return option.value === previousValue;
+      });
+      selectEl.value = canRestore ? previousValue : defaultValue;
+    }
+
+    function syncDispositionLockWithRetention_(targetId, isAllRetention) {
+      const dispEl = document.getElementById(`localDispositionMethod_${targetId}`);
+      const evidEl = document.getElementById(`localEvidenceRequirements_${targetId}`);
+      if (isAllRetention) {
+        lockChoiceSelectForRetentionAll_(dispEl, '磁碟自動覆寫');
+        lockChoiceSelectForRetentionAll_(evidEl, '備份系統執行Log');
+      } else {
+        unlockChoiceSelectFromRetentionAll_(dispEl, '磁碟自動覆寫');
+        unlockChoiceSelectFromRetentionAll_(evidEl, '備份系統執行Log');
+      }
+    }
+
     // --- 排程時間標準語法核心引擎 ---
     function formatTrackSchedule(unit, time, options = {}) {
       const u = String(unit || '天').trim();
@@ -1329,8 +1388,11 @@
           // 本地到期銷毀方法與銷毀確認方式回填
           const elLocalDisp = document.getElementById(`localDispositionMethod_${tid}`);
           const elLocalEvid = document.getElementById(`localEvidenceRequirements_${tid}`);
+          // 先解除前面保留模式套用的停用，避免鎖定狀態蓋掉回填值；回填後再依「保留所有版本」重新套用（全部保留顯示「無」）
+          syncDispositionLockWithRetention_(tid, false);
           setChoiceSelectValue_(elLocalDisp, tData.localDispositionMethod, '磁碟自動覆寫');
           setChoiceSelectValue_(elLocalEvid, tData.localEvidenceRequirements, '備份系統執行Log');
+          toggleLocalRetentionMode(tid);
 
           // 異地存放設定
           if (tData.isOffsite === '是') {
@@ -1752,6 +1814,7 @@
     }
 
     function toggleLocalRetentionMode(targetId) {
+      if (targetId === 'log') return; // 系統日誌檔沒有「保留所有版本」選項
       const allRetentionCheckbox = document.getElementById(`localRetAll_${targetId}`);
       const localRetentionInput = document.getElementById(`localRet_${targetId}`);
       const targetCheckbox = document.getElementById(`check_${targetId}`);
@@ -1765,6 +1828,7 @@
       if (isAllRetention) {
         localRetentionInput.value = '';
       }
+      syncDispositionLockWithRetention_(targetId, isAllRetention);
     }
 
     // 控制個別標的內的「異地存放」區塊顯示與必填邏輯
@@ -1840,6 +1904,7 @@
           logRetention = '保存 ' + document.getElementById(`logRetVal_${t.id}`).value + ' ' + document.getElementById(`logRetUnit_${t.id}`).value;
         }
 
+        const isAllRetention = t.id !== 'log' && document.getElementById(`localRetAll_${t.id}`).checked;
         const localScheduleEl = document.getElementById(`localScheduleTime_${t.id}`);
         const localDispEl = document.getElementById(`localDispositionMethod_${t.id}`);
         const localEvidEl = document.getElementById(`localEvidenceRequirements_${t.id}`);
@@ -1859,8 +1924,9 @@
             : logRetention,
           localLocation: t.id !== 'log' ? document.getElementById(`localLoc_${t.id}`).value : document.getElementById(`logLocalLoc_${t.id}`).value,
           localScheduleTime: localScheduleEl ? (localScheduleEl.value.trim() || '每日 00:00') : '每日 00:00',
-          localDispositionMethod: localDispEl ? (localDispEl.value.trim() || '磁碟自動覆寫') : '磁碟自動覆寫',
-          localEvidenceRequirements: localEvidEl ? (localEvidEl.value.trim() || '備份系統執行Log') : '備份系統執行Log',
+          // 全部保留代表不會銷毀：到期銷毀方法與銷毀確認方式一律送「無」
+          localDispositionMethod: isAllRetention ? '無' : (localDispEl ? (localDispEl.value.trim() || '磁碟自動覆寫') : '磁碟自動覆寫'),
+          localEvidenceRequirements: isAllRetention ? '無' : (localEvidEl ? (localEvidEl.value.trim() || '備份系統執行Log') : '備份系統執行Log'),
           logRetention: logRetention,
           isOffsite: isOffsite,
           offsiteFreqValue: isOffsite === '是' ? document.getElementById(`offsiteFreqValue_${t.id}`).value : '',

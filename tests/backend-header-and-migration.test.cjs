@@ -983,3 +983,71 @@ test('submitData 系統日誌檔不受完整、差異二擇一規則限制', () 
   assert.equal(result.success, true, result.message);
   assert.equal(written.length, 1);
 });
+
+
+// --- 保留所有版本：到期銷毀方法與銷毀確認方式一律寫入「無」---
+
+test('buildSheetRowData_ 本地保留代數為全部保留時，銷毀方法與確認方式寫入「無」', () => {
+  ['ALL', '全部保留'].forEach(function(retention) {
+    const row = buildRowFor_({
+      localRetention: retention,
+      localDispositionMethod: '人工手動覆蓋',
+      localEvidenceRequirements: '備份檔名確認'
+    });
+    assert.equal(row[8], '全部保留', '本地_保留代數');
+    assert.equal(row[11], '無', '本地_到期銷毀方法：' + retention);
+    assert.equal(row[12], '無', '本地_銷毀確認方式：' + retention);
+  });
+});
+
+test('buildSheetRowData_ 一般保留代數時維持使用者選擇與預設值', () => {
+  const chosen = buildRowFor_({
+    localRetention: '4',
+    localDispositionMethod: '人工手動覆蓋',
+    localEvidenceRequirements: '備份檔名確認'
+  });
+  assert.equal(chosen[11], '人工手動覆蓋');
+  assert.equal(chosen[12], '備份檔名確認');
+
+  const defaults = buildRowFor_({ localRetention: '4' });
+  assert.equal(defaults[11], '磁碟自動覆寫');
+  assert.equal(defaults[12], '備份系統執行Log');
+});
+
+test('buildSheetRowData_ 全部保留不影響異地備份的銷毀設定', () => {
+  const row = buildRowFor_({
+    localRetention: 'ALL',
+    isOffsite: '是',
+    offsiteFreqValue: '1', offsiteFreqUnit: '個月',
+    offsiteLocation: '國網中心', offsiteRetention: '2',
+    offsiteDispositionMethod: '人工手動覆蓋',
+    offsiteEvidenceRequirements: '備份檔名確認'
+  });
+  assert.equal(row[11], '無');
+  assert.equal(row[12], '無');
+  assert.equal(row[18], '人工手動覆蓋', '異地_到期銷毀方法不受影響');
+  assert.equal(row[19], '備份檔名確認', '異地_銷毀確認方式不受影響');
+});
+
+test('submitData 即使前端（或舊版前端）送來預設銷毀值，全部保留仍強制寫「無」', () => {
+  const { result, written } = runSubmitData_([{
+    targetKey: 'db', targetName: '資料庫',
+    localFullValue: '1', localFullUnit: '週', localDiffValue: '0', localDiffUnit: '天',
+    localRetention: 'ALL', localLocation: 'NAS', isOffsite: '否',
+    localDispositionMethod: '磁碟自動覆寫',
+    localEvidenceRequirements: '備份系統執行Log'
+  }]);
+  assert.equal(result.success, true, result.message);
+  assert.equal(written[0][8], '全部保留');
+  assert.equal(written[0][11], '無');
+  assert.equal(written[0][12], '無');
+});
+
+test('parseTargetFromRow 讀取已存為「無」的銷毀欄位時不得被預設值蓋回', () => {
+  const row = buildRowFor_({ localRetention: 'ALL' });
+  const indices = mod.resolveHeaderIndices_(mod.EXPECTED_HEADERS);
+  const parsed = mod.parseTargetFromRow(row, indices, 'db');
+  assert.equal(parsed.localRetention, 'ALL');
+  assert.equal(parsed.localDispositionMethod, '無');
+  assert.equal(parsed.localEvidenceRequirements, '無');
+});

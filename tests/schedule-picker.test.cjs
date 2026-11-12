@@ -135,6 +135,8 @@ const {
   updateSchedulePickerUI,
   updateDiffPickerVisibility,
   updateFullPickerVisibility,
+  toggleLocalRetentionMode,
+  toggleTarget,
   validateLocalBackupCycles,
   isCycleValueEnabled_,
   syncTargetSchedule,
@@ -978,4 +980,226 @@ test('表單編輯回填僅差異備份：完整備份數值留空、完整軌�
   assert.equal(currentMockDom.getElementById('diffSchedulePicker_db').classList.contains('hidden'), false);
   assert.equal(currentMockDom.getElementById('diffSchedTime_db').value, '01:30');
   assert.equal(currentMockDom.getElementById('localScheduleTime_db').value, '差異:每日 01:30');
+});
+
+
+// --- 保留所有版本：停用到期銷毀方法與銷毀確認方式（全部保留不會銷毀，顯示並送出「無」）---
+
+function registerDispositionSelects_(dom, targetId, disp, evid) {
+  const dispEl = dom.register(`localDispositionMethod_${targetId}`, { value: disp || '磁碟自動覆寫' });
+  dispEl.options.push({ value: '磁碟自動覆寫' }, { value: '人工手動覆蓋' });
+  const evidEl = dom.register(`localEvidenceRequirements_${targetId}`, { value: evid || '備份系統執行Log' });
+  evidEl.options.push({ value: '備份系統執行Log' }, { value: '備份檔名確認' });
+  dom.register(`check_${targetId}`, { checked: true });
+  dom.register(`localRet_${targetId}`, { value: '4' });
+  return { dispEl, evidEl, retAllEl: dom.register(`localRetAll_${targetId}`, { checked: false }) };
+}
+
+test('勾選「保留所有版本」會停用兩個銷毀欄位並顯示「無」，取消勾選恢復原本的選擇', () => {
+  currentMockDom = createMockDom();
+  const { dispEl, evidEl, retAllEl } = registerDispositionSelects_(currentMockDom, 'db', '人工手動覆蓋', '備份檔名確認');
+
+  retAllEl.checked = true;
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.disabled, true);
+  assert.equal(evidEl.disabled, true);
+  assert.equal(dispEl.value, '無');
+  assert.equal(evidEl.value, '無');
+  assert.equal(dispEl.options.filter(o => o.value === '無').length, 1, '只應有一個暫時的「無」選項');
+
+  // 重複呼叫不得重複新增選項，也不得覆蓋原本記住的選擇
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.options.filter(o => o.value === '無').length, 1);
+
+  retAllEl.checked = false;
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.disabled, false);
+  assert.equal(evidEl.disabled, false);
+  assert.equal(dispEl.value, '人工手動覆蓋', '應恢復勾選前的選擇');
+  assert.equal(evidEl.value, '備份檔名確認', '應恢復勾選前的選擇');
+  assert.equal(dispEl.options.some(o => o.value === '無'), false, '暫時的「無」選項應被移除');
+});
+
+test('未曾更動選擇就勾選、取消「保留所有版本」，銷毀欄位回到預設值', () => {
+  currentMockDom = createMockDom();
+  const { dispEl, evidEl, retAllEl } = registerDispositionSelects_(currentMockDom, 'source');
+
+  retAllEl.checked = true;
+  toggleLocalRetentionMode('source');
+  retAllEl.checked = false;
+  toggleLocalRetentionMode('source');
+  assert.equal(dispEl.value, '磁碟自動覆寫');
+  assert.equal(evidEl.value, '備份系統執行Log');
+  assert.equal(dispEl.disabled, false);
+});
+
+test('未勾選「保留所有版本」時，toggleLocalRetentionMode 不得更動使用者目前的銷毀欄位選擇', () => {
+  currentMockDom = createMockDom();
+  const { dispEl, evidEl } = registerDispositionSelects_(currentMockDom, 'db', '人工手動覆蓋', '備份檔名確認');
+
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.value, '人工手動覆蓋');
+  assert.equal(evidEl.value, '備份檔名確認');
+  assert.equal(dispEl.disabled, false);
+});
+
+test('編輯「全部保留」的標的：勾選保留、銷毀欄位顯示「無」並停用；取消勾選後回到已存的選擇', () => {
+  currentMockDom = createMockDom();
+  const dispEl = currentMockDom.register('localDispositionMethod_db', { value: '磁碟自動覆寫' });
+  dispEl.options.push({ value: '磁碟自動覆寫' }, { value: '人工手動覆蓋' });
+  const evidEl = currentMockDom.register('localEvidenceRequirements_db', { value: '備份系統執行Log' });
+  evidEl.options.push({ value: '備份系統執行Log' }, { value: '備份檔名確認' });
+
+  vm.runInContext(`appData = [{
+    id: "sys-all",
+    systemName: "全部保留系統",
+    systemLevel: "一般系統",
+    managerName: "林小美",
+    targets: [
+      {
+        targetKey: "db",
+        targetName: "資料庫",
+        localDiffValue: "1",
+        localDiffUnit: "天",
+        localFullValue: "1",
+        localFullUnit: "週",
+        localRetention: "全部保留",
+        localLocation: "正式機房",
+        localScheduleTime: "完整:每週日 02:00 / 差異:每日 01:30",
+        localDispositionMethod: "人工手動覆蓋",
+        localEvidenceRequirements: "備份檔名確認",
+        isOffsite: "否",
+        offsiteScheduleTime: "無"
+      }
+    ]
+  }];`, sandbox);
+
+  editSystem('sys-all');
+
+  assert.equal(currentMockDom.getElementById('localRetAll_db').checked, true);
+  assert.equal(dispEl.disabled, true);
+  assert.equal(evidEl.disabled, true);
+  assert.equal(dispEl.value, '無');
+  assert.equal(evidEl.value, '無');
+
+  // 使用者取消「保留所有版本」後，回到資料庫已存的選擇而不是預設值
+  currentMockDom.getElementById('localRetAll_db').checked = false;
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.disabled, false);
+  assert.equal(dispEl.value, '人工手動覆蓋');
+  assert.equal(evidEl.value, '備份檔名確認');
+});
+
+test('編輯已存為「無」的全部保留資料：取消勾選後回到預設值', () => {
+  currentMockDom = createMockDom();
+  const dispEl = currentMockDom.register('localDispositionMethod_db', { value: '磁碟自動覆寫' });
+  dispEl.options.push({ value: '磁碟自動覆寫' }, { value: '人工手動覆蓋' });
+  const evidEl = currentMockDom.register('localEvidenceRequirements_db', { value: '備份系統執行Log' });
+  evidEl.options.push({ value: '備份系統執行Log' }, { value: '備份檔名確認' });
+
+  vm.runInContext(`appData = [{
+    id: "sys-all-none",
+    systemName: "全部保留系統",
+    systemLevel: "一般系統",
+    managerName: "林小美",
+    targets: [
+      {
+        targetKey: "db",
+        targetName: "資料庫",
+        localDiffValue: "0",
+        localDiffUnit: "天",
+        localFullValue: "1",
+        localFullUnit: "週",
+        localRetention: "ALL",
+        localLocation: "正式機房",
+        localScheduleTime: "每週日 02:00",
+        localDispositionMethod: "無",
+        localEvidenceRequirements: "無",
+        isOffsite: "否",
+        offsiteScheduleTime: "無"
+      }
+    ]
+  }];`, sandbox);
+
+  editSystem('sys-all-none');
+  assert.equal(dispEl.disabled, true);
+  assert.equal(dispEl.value, '無');
+
+  currentMockDom.getElementById('localRetAll_db').checked = false;
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.value, '磁碟自動覆寫');
+  assert.equal(evidEl.value, '備份系統執行Log');
+});
+
+test('handleFormSubmit：全部保留時銷毀方法與確認方式送「無」，一般保留代數則送使用者選擇', () => {
+  function runSubmit(isAll) {
+    currentMockDom = createMockDom();
+    const { dispEl, evidEl, retAllEl } = registerDispositionSelects_(currentMockDom, 'db', '人工手動覆蓋', '備份檔名確認');
+    currentMockDom.getElementById('fullValue_db').value = '1';
+    currentMockDom.getElementById('fullUnit_db').value = '天';
+    currentMockDom.getElementById('offsite_db_val_否').checked = true;
+    currentMockDom.getElementById('offsite_db_val_否').value = '否';
+    currentMockDom.getElementById('localLoc_db').value = 'AST-001 - 備份設備';
+    vm.runInContext(`
+      assetOptionsLoadState = "ready";
+      assetOptionsData = [{ name: "AST-001 - 備份設備", level: "一般系統" }];
+    `, sandbox);
+
+    retAllEl.checked = isAll;
+    toggleLocalRetentionMode('db');
+
+    let submitted = null;
+    sandbox.google = { script: { run: {
+      withSuccessHandler() { return this; },
+      withFailureHandler() { return this; },
+      submitData(formData) { submitted = formData; }
+    } } };
+    handleFormSubmit({ preventDefault: () => {} });
+    delete sandbox.google;
+    return submitted.targets[0];
+  }
+
+  const all = runSubmit(true);
+  assert.equal(all.localRetention, 'ALL');
+  assert.equal(all.localDispositionMethod, '無');
+  assert.equal(all.localEvidenceRequirements, '無');
+
+  const normal = runSubmit(false);
+  assert.equal(normal.localRetention, '4');
+  assert.equal(normal.localDispositionMethod, '人工手動覆蓋');
+  assert.equal(normal.localEvidenceRequirements, '備份檔名確認');
+});
+
+test('resetForm 會解除「保留所有版本」造成的停用並回到預設值', () => {
+  currentMockDom = createMockDom();
+  const { dispEl, evidEl, retAllEl } = registerDispositionSelects_(currentMockDom, 'db', '人工手動覆蓋', '備份檔名確認');
+  currentMockDom.getElementById('check_db').checked = false;
+
+  retAllEl.checked = true;
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.disabled, true);
+
+  resetForm();
+  assert.equal(retAllEl.checked, false);
+  assert.equal(dispEl.disabled, false);
+  assert.equal(evidEl.disabled, false);
+  assert.equal(dispEl.value, '磁碟自動覆寫');
+  assert.equal(evidEl.value, '備份系統執行Log');
+});
+
+test('取消勾選整個標的會解除「保留所有版本」的停用狀態', () => {
+  currentMockDom = createMockDom();
+  const { dispEl, retAllEl } = registerDispositionSelects_(currentMockDom, 'db', '人工手動覆蓋', '備份檔名確認');
+  currentMockDom.register('details_db', {});
+  currentMockDom.register('badge_db', {});
+
+  retAllEl.checked = true;
+  toggleLocalRetentionMode('db');
+  assert.equal(dispEl.disabled, true);
+
+  currentMockDom.getElementById('check_db').checked = false;
+  toggleTarget('db');
+  assert.equal(retAllEl.checked, false);
+  assert.equal(dispEl.disabled, false);
+  assert.equal(dispEl.value, '磁碟自動覆寫');
 });
